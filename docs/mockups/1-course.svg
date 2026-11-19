@@ -3,13 +3,15 @@
   <rect x="30" y="20" width="500" height="560" rx="18" fill="#1b2530"/>
   <rect x="40" y="60" width="480" height="480" fill="#000000"/>
   <rect x="40" y="60" width="480" height="480" fill="none" stroke="#31404f" stroke-width="4"/>
-  <rect x="48" y="94" width="26" height="290" fill="#14532D"/>
-  <rect x="74" y="68" width="135" height="26" fill="#14532D"/>
-  <rect x="209" y="68" width="85" height="26" fill="#78350F"/>
-  <rect x="294" y="68" width="86" height="26" fill="#7F1D1D"/>
-  <rect x="74" y="68" width="195" height="26" fill="#F59E0B"/>
-  <rect x="48" y="94" width="26" height="290" fill="#F59E0B"/>
-  <rect x="331" y="62" width="4" height="38" rx="2" fill="#FFFFFF"/>
+  <rect x="40" y="126" width="26" height="258" fill="#14532D"/>
+  <path d="M 40,126 A 66,66 0 0 1 106,60 L 106,86 A 40,40 0 0 0 66,126 Z" fill="#14532D" opacity="1.0"/>
+  <rect x="106" y="60" width="98" height="26" fill="#14532D"/>
+  <rect x="204" y="60" width="88" height="26" fill="#78350F"/>
+  <rect x="292" y="60" width="88" height="26" fill="#7F1D1D"/>
+  <path d="M 40,126 A 66,66 0 0 1 106,60 L 106,86 A 40,40 0 0 0 66,126 Z" fill="#F59E0B" opacity="1.0"/>
+  <rect x="106" y="60" width="159" height="26" fill="#F59E0B"/>
+  <rect x="40" y="126" width="26" height="258" fill="#F59E0B"/>
+  <rect x="329" y="54" width="4" height="38" rx="2" fill="#FFFFFF"/>
   <rect x="340" y="178" width="74" height="26" rx="5" fill="#F59E0B"/>
   <text x="377" y="196" fill="None" font-weight="bold" font-size="14" text-anchor="middle" font-family='Montserrat, Arial, sans-serif'>7 sats</text>
   <rect x="422" y="178" width="56" height="26" rx="5" fill="#22C55E"/>
@@ -17,8 +19,8 @@
   <rect x="486" y="178" width="44" height="26" rx="5" fill="#22C55E"/>
   <text x="508" y="196" fill="None" font-weight="bold" font-size="14" text-anchor="middle" font-family='Montserrat, Arial, sans-serif'>BLE</text>
   <text x="530" y="228" fill="#9CA3AF" font-size="13" text-anchor="end" font-family='Montserrat, Arial, sans-serif'>2.0m</text>
-  <text x="280" y="252" fill="#F59E0B" font-size="84" font-weight="bold" text-anchor="middle" font-family='Montserrat, Arial, sans-serif'>570&#176;c</text>
-  <text x="280" y="324" fill="#FFFFFF" font-size="40" font-weight="bold" text-anchor="middle" font-family='Montserrat, Arial, sans-serif'>00'26,98</text>
+  <text x="134" y="212" fill="#F59E0B" font-size="84" font-weight="bold" font-family='Montserrat, Arial, sans-serif'>570&#176;c</text>
+  <text x="320" y="396" fill="#FFFFFF" font-size="56" font-weight="bold" text-anchor="middle" font-family='Montserrat, Arial, sans-serif'>00'26,98</text>
   <text x="68" y="506" fill="#FFFFFF" font-size="22" font-family='Montserrat, Arial, sans-serif'>BEST   1'02,24</text>
   <text x="492" y="506" fill="#FFFFFF" font-size="22" text-anchor="end" font-family='Montserrat, Arial, sans-serif'>LAST   1'12,33</text>
   <circle cx="272" cy="530" r="4" fill="#38BDF8"/>
@@ -26,5 +28,5 @@
   <circle cx="320" cy="530" r="4" fill="#6B7280"/>
   <circle cx="344" cy="530" r="4" fill="#6B7280"/>
   <circle cx="368" cy="530" r="4" fill="#6B7280"/>
-  <text x="30" y="588" fill="#8fa3b2" font-size="13" font-family='Montserrat, Arial, sans-serif'>Page COURSE - bargraph EGT coude en L (bord gauche puis bord haut), caracteres pleine largeur, badges GPS/SD/BLE, BEST/LAST</text>
+  <text x="30" y="588" fill="#8fa3b2" font-size="13" font-family='Montserrat, Arial, sans-serif'>Page COURSE - bargraph coude a coude ARRONDI (quart de cercle), EGT haut gauche pleine echelle, chrono centre, badges GPS/SD/BLE</text>
 </svg>
