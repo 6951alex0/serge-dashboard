@@ -8,6 +8,7 @@
 #include "data_model.h"
 #include "drivers/screen.h"
 #include "compute/acq.h"
+#include "ble/ble_server.h"
 #include "storage/sd_logger.h"
 #include "sensors/gps.h"
 
@@ -29,8 +30,8 @@ lv_obj_t *g_pages[5];
 uint8_t g_pageIdx = PAGE_RACE;
 
 // Course
-lv_obj_t *wSpeedLabel, *wEgtFill, *wEgtLabel, *wLapCur, *wLapBest, *wLapLast;
-lv_obj_t *wRecDot, *wStatusLine;
+lv_obj_t *wSpeedLabel, *wEgtFill, *wEgtLabel, *wEgtMark, *wLapCur, *wLapBest, *wLapLast;
+lv_obj_t *wStatusLine, *wBleBadge;
 
 // Telemetrie
 lv_obj_t *wGZone, *wGDot, *wBankBar, *wBankLabel, *wGLongLabel, *wGLatLabel;
@@ -295,9 +296,16 @@ void buildRacePage()
     makeLabel(p, "0", &lv_font_montserrat_14, C_DIM,
               LV_ALIGN_TOP_LEFT, EGT_BAR_X + EGT_BAR_W + 4, EGT_BAR_Y + EGT_BAR_H - 12);
 
+    // Curseur : maximum EGT enregistre durant la session
+    wEgtMark = lv_obj_create(track);
+    lv_obj_remove_style_all(wEgtMark);
+    lv_obj_set_size(wEgtMark, EGT_BAR_W + 12, 4);
+    lv_obj_align(wEgtMark, LV_ALIGN_BOTTOM_MID, 0, 0);
+    lv_obj_set_style_bg_color(wEgtMark, C_WHITE, 0);
+    lv_obj_set_style_bg_opa(wEgtMark, LV_OPA_COVER, 0);
+    lv_obj_set_style_radius(wEgtMark, 2, 0);
+
     // Valeur EGT en grand, a droite du bargraph
-    makeLabel(p, "EGT", &lv_font_montserrat_16, C_DIM,
-              LV_ALIGN_TOP_LEFT, 140, 78);
     wEgtLabel = makeLabel(p, "---", &lv_font_montserrat_48, C_GREEN,
                           LV_ALIGN_TOP_LEFT, 140, 100);
 
@@ -315,18 +323,22 @@ void buildRacePage()
     wLapLast = makeLabel(p, "PREC.     --:--.-", &lv_font_montserrat_22, C_DIM,
                          LV_ALIGN_BOTTOM_LEFT, 28, -22);
 
-    // REC + statut
-    wRecDot = lv_obj_create(p);
-    lv_obj_remove_style_all(wRecDot);
-    lv_obj_set_size(wRecDot, 12, 12);
-    lv_obj_set_style_radius(wRecDot, LV_RADIUS_CIRCLE, 0);
-    lv_obj_set_style_bg_color(wRecDot, C_GRAY, 0);
-    lv_obj_set_style_bg_opa(wRecDot, LV_OPA_COVER, 0);
-    lv_obj_align(wRecDot, LV_ALIGN_TOP_LEFT, 18, 14);
-
+    // Statut (aligne a droite de la pastille BLE)
     wStatusLine = makeLabel(p, "", &lv_font_montserrat_14, C_DIM,
-                            LV_ALIGN_TOP_RIGHT, -16, 10);
+                            LV_ALIGN_TOP_RIGHT, -110, 16);
     lv_label_set_recolor(wStatusLine, true);
+
+    // Pastille BLE : fond vert si connecte, rouge sinon
+    wBleBadge = lv_label_create(p);
+    lv_label_set_text(wBleBadge, "BLE");
+    lv_obj_set_style_text_font(wBleBadge, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_color(wBleBadge, C_BG, 0);
+    lv_obj_set_style_bg_color(wBleBadge, C_RED, 0);
+    lv_obj_set_style_bg_opa(wBleBadge, LV_OPA_COVER, 0);
+    lv_obj_set_style_radius(wBleBadge, 4, 0);
+    lv_obj_set_style_pad_hor(wBleBadge, 8, 0);
+    lv_obj_set_style_pad_ver(wBleBadge, 4, 0);
+    lv_obj_align(wBleBadge, LV_ALIGN_TOP_RIGHT, -16, 10);
 }
 
 // ---------------------------- Page TELEMETRIE ------------------------------
@@ -561,7 +573,10 @@ void updateRacePage(const TelemetryFrame &f, const ChronoState &c)
     fmtLap(c.last_lap_ms, last, sizeof(last));
     lv_label_set_text_fmt(wLapLast, "PREC.     %s", last);
 
-    lv_obj_set_style_bg_color(wRecDot, f.recording ? C_RED : C_GRAY, 0);
+    int markH = (int)(f.egt_max_c / 700.0f * EGT_BAR_H);
+    if (markH < 0) markH = 0;
+    if (markH > EGT_BAR_H) markH = EGT_BAR_H;
+    lv_obj_align(wEgtMark, LV_ALIGN_BOTTOM_MID, 0, -markH);
 
     GpsFix g = gps_get();
     const char *sdCol = sd_ready() ? "#22C55E" : "#EF4444";
@@ -576,6 +591,8 @@ void updateRacePage(const TelemetryFrame &f, const ChronoState &c)
     else
         lv_label_set_text_fmt(wStatusLine, "#EF4444 GPS --#  %s SD %s#",
                               sdCol, sd_ready() ? "ok" : "--");
+    lv_obj_align(wStatusLine, LV_ALIGN_TOP_RIGHT, -110, 16);
+    lv_obj_set_style_bg_color(wBleBadge, ble_connected() ? C_GREEN : C_RED, 0);
 }
 
 void updateTelemPage(const TelemetryFrame &f, const ChronoState &)

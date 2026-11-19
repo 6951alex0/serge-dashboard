@@ -233,3 +233,8 @@ void ble_start()
     xTaskCreatePinnedToCore(bleLiveTask, "bleLive", 4096, nullptr, 2, nullptr, 0);
     xTaskCreatePinnedToCore(bleTransferTask, "bleXfer", 4096, nullptr, 1, nullptr, 0);
 }
+
+bool ble_connected()
+{
+    return g_clientConnected;
+}
