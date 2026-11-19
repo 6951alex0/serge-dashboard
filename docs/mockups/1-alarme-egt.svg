@@ -9,22 +9,24 @@
   <circle cx="344" cy="74" r="4" fill="#6B7280"/>
   <circle cx="368" cy="74" r="4" fill="#6B7280"/>
   <text x="280" y="92" fill="#000000" font-size="14" text-anchor="middle" font-family='Montserrat, Arial, sans-serif'>COURSE</text>
-  <text x="480" y="84" font-size="13" text-anchor="end" font-family='Montserrat, Arial, sans-serif'><tspan fill="#000000">12 sats</tspan> <tspan fill="#000000">2.0m</tspan> <tspan fill="#000000">SD ok</tspan></text>
-  <rect x="446" y="124" width="44" height="26" rx="5" fill="#22C55E"/>
-  <text x="468" y="142" fill="#000000" font-size="14" font-weight="bold" text-anchor="middle" font-family='Montserrat, Arial, sans-serif'>BLE</text>
+  <rect x="340" y="130" width="74" height="26" rx="5" fill="#F59E0B"/>
+  <text x="377" y="148" fill="#000000" font-weight="bold" font-size="14" text-anchor="middle" font-family='Montserrat, Arial, sans-serif'>7 sats</text>
+  <rect x="422" y="130" width="56" height="26" rx="5" fill="#22C55E"/>
+  <text x="450" y="148" fill="#000000" font-weight="bold" font-size="14" text-anchor="middle" font-family='Montserrat, Arial, sans-serif'>SD ok</text>
+  <rect x="486" y="130" width="44" height="26" rx="5" fill="#22C55E"/>
+  <text x="508" y="148" fill="#000000" font-weight="bold" font-size="14" text-anchor="middle" font-family='Montserrat, Arial, sans-serif'>BLE</text>
+  <text x="410" y="176" fill="#000000" font-size="13" text-anchor="end" font-family='Montserrat, Arial, sans-serif'>2.0m</text>
   <rect x="74" y="124" width="34" height="300" rx="4" fill="#1F2937"/>
+  <rect x="74" y="382" width="34" height="42" fill="#7F1D1D"/>
+  <rect x="74" y="340" width="34" height="42" fill="#78350F"/>
+  <rect x="74" y="124" width="34" height="216" fill="#14532D"/>
   <rect x="74" y="138" width="34" height="286" rx="4" fill="#EF4444"/>
   <rect x="68" y="146" width="46" height="4" rx="2" fill="#000000"/>
-  <text x="116" y="134" fill="#000000" font-size="13" font-family='Montserrat, Arial, sans-serif'>700</text>
-  <text x="116" y="280" fill="#000000" font-size="13" font-family='Montserrat, Arial, sans-serif'>350</text>
-  <text x="116" y="424" fill="#000000" font-size="13" font-family='Montserrat, Arial, sans-serif'>0</text>
-  <text x="180" y="208" fill="#000000" font-size="48" font-weight="bold" font-family='Montserrat, Arial, sans-serif'>668 &#176;C</text>
-  <text x="210" y="306" fill="#000000" font-size="48" font-weight="bold" font-family='Montserrat, Arial, sans-serif'>148</text>
-  <text x="216" y="328" fill="#000000" font-size="16" font-family='Montserrat, Arial, sans-serif'>km/h</text>
-  <text x="68" y="458" fill="#000000" font-size="22" font-family='Montserrat, Arial, sans-serif'>TOUR      0:32,4</text>
-  <text x="68" y="490" fill="#000000" font-size="22" font-family='Montserrat, Arial, sans-serif'>MEILLEUR  0:31,1</text>
-  <text x="68" y="522" fill="#000000" font-size="22" font-family='Montserrat, Arial, sans-serif'>PREC.     0:32,4</text>
+  <text x="280" y="210" fill="#000000" font-size="48" font-weight="bold" text-anchor="middle" font-family='Montserrat, Arial, sans-serif'>668&#176;c</text>
+  <text x="280" y="256" fill="#000000" font-size="30" text-anchor="middle" font-family='Montserrat, Arial, sans-serif'>00'26,98</text>
+  <text x="68" y="506" fill="#000000" font-size="22" font-family='Montserrat, Arial, sans-serif'>BEST   1'02,24</text>
+  <text x="492" y="506" fill="#000000" font-size="22" text-anchor="end" font-family='Montserrat, Arial, sans-serif'>LAST   1'12,33</text>
   <rect x="40" y="60" width="480" height="480" fill="#FF8C00" opacity="0.45"/>
-  <text x="280" y="560" fill="#FF8C00" font-size="18" text-anchor="middle" font-weight="bold" font-family='Montserrat, Arial, sans-serif'>ALERTE EGT &gt; 650 &#176;C</text>
-  <text x="30" y="588" fill="#8fa3b2" font-size="13" font-family='Montserrat, Arial, sans-serif'>Page COURSE - felin noir : bargraph EGT vertical gauche + curseur max session, EGT, vitesse, 3 chronos, statut GPS/SD + pastille BLE</text>
+  <text x="280" y="560" fill="#FF8C00" font-size="18" text-anchor="middle" font-weight="bold" font-family='Montserrat, Arial, sans-serif'>ALERTE EGT &gt; 650 &#176;c</text>
+  <text x="30" y="588" fill="#8fa3b2" font-size="13" font-family='Montserrat, Arial, sans-serif'>Page COURSE fidele au design : EGT centre + temps courant, BEST/LAST en bas, badges GPS/SD/BLE haut droit, bargraph zones + curseur max</text>
 </svg>

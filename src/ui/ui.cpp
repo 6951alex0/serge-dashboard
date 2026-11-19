@@ -30,8 +30,8 @@ lv_obj_t *g_pages[5];
 uint8_t g_pageIdx = PAGE_RACE;
 
 // Course
-lv_obj_t *wSpeedLabel, *wEgtFill, *wEgtLabel, *wEgtMark, *wLapCur, *wLapBest, *wLapLast;
-lv_obj_t *wStatusLine, *wBleBadge;
+lv_obj_t *wEgtFill, *wEgtLabel, *wEgtMark, *wLapCur, *wLapBest, *wLapLast;
+lv_obj_t *wGpsBadge, *wSdBadge, *wBleBadge, *wAccLabel;
 
 // Telemetrie
 lv_obj_t *wGZone, *wGDot, *wBankBar, *wBankLabel, *wGLongLabel, *wGLatLabel;
@@ -62,15 +62,30 @@ lv_obj_t *makeLabel(lv_obj_t *parent, const char *txt, const lv_font_t *font,
     return l;
 }
 
+lv_obj_t *makeBadge(lv_obj_t *parent, const char *txt, lv_coord_t xo, lv_coord_t yo, lv_color_t bg)
+{
+    lv_obj_t *b = lv_label_create(parent);
+    lv_label_set_text(b, txt);
+    lv_obj_set_style_text_font(b, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_color(b, C_BG, 0);
+    lv_obj_set_style_bg_color(b, bg, 0);
+    lv_obj_set_style_bg_opa(b, LV_OPA_COVER, 0);
+    lv_obj_set_style_radius(b, 4, 0);
+    lv_obj_set_style_pad_hor(b, 8, 0);
+    lv_obj_set_style_pad_ver(b, 4, 0);
+    lv_obj_align(b, LV_ALIGN_TOP_RIGHT, xo, yo);
+    return b;
+}
+
 const char *fmtLap(uint32_t ms, char *buf, size_t len)
 {
     if (ms == 0) {
-        snprintf(buf, len, "--:--.-");
+        snprintf(buf, len, "--'--,--");
     } else {
         uint32_t m = ms / 60000;
         uint32_t s = (ms % 60000) / 1000;
-        uint32_t d = (ms % 1000) / 100;
-        snprintf(buf, len, "%lum %lu,%lu s", (unsigned long)m, (unsigned long)s, (unsigned long)d);
+        uint32_t h = (ms % 1000) / 10;
+        snprintf(buf, len, "%02lu'%02lu,%02lu", (unsigned long)m, (unsigned long)s, (unsigned long)h);
     }
     return buf;
 }
@@ -281,6 +296,31 @@ void buildRacePage()
     lv_obj_set_style_radius(track, 4, 0);
     lv_obj_clear_flag(track, LV_OBJ_FLAG_SCROLLABLE);
 
+    // Fond : rappel discret des 3 zones EGT (0-500 vert, 500-600 orange, 600-700 rouge)
+    const int RED_H = (int)(100.0f / 700 * EGT_BAR_H);
+    const int ORA_H = (int)(100.0f / 700 * EGT_BAR_H);
+    const int GRN_H = EGT_BAR_H - ORA_H - RED_H;
+    lv_obj_t *seg = lv_obj_create(track);
+    lv_obj_remove_style_all(seg);
+    lv_obj_set_size(seg, EGT_BAR_W, GRN_H);
+    lv_obj_align(seg, LV_ALIGN_BOTTOM_MID, 0, 0);
+    lv_obj_set_style_bg_color(seg, lv_color_hex(0x14532D), 0);
+    lv_obj_set_style_bg_opa(seg, LV_OPA_COVER, 0);
+
+    seg = lv_obj_create(track);
+    lv_obj_remove_style_all(seg);
+    lv_obj_set_size(seg, EGT_BAR_W, ORA_H);
+    lv_obj_align(seg, LV_ALIGN_BOTTOM_MID, 0, -GRN_H);
+    lv_obj_set_style_bg_color(seg, lv_color_hex(0x78350F), 0);
+    lv_obj_set_style_bg_opa(seg, LV_OPA_COVER, 0);
+
+    seg = lv_obj_create(track);
+    lv_obj_remove_style_all(seg);
+    lv_obj_set_size(seg, EGT_BAR_W, RED_H);
+    lv_obj_align(seg, LV_ALIGN_BOTTOM_MID, 0, -(GRN_H + ORA_H));
+    lv_obj_set_style_bg_color(seg, lv_color_hex(0x7F1D1D), 0);
+    lv_obj_set_style_bg_opa(seg, LV_OPA_COVER, 0);
+
     wEgtFill = lv_obj_create(track);
     lv_obj_remove_style_all(wEgtFill);
     lv_obj_set_size(wEgtFill, EGT_BAR_W, 0);
@@ -288,13 +328,6 @@ void buildRacePage()
     lv_obj_set_style_bg_color(wEgtFill, C_GREEN, 0);
     lv_obj_set_style_bg_opa(wEgtFill, LV_OPA_COVER, 0);
     lv_obj_set_style_radius(wEgtFill, 4, 0);
-
-    makeLabel(p, "700", &lv_font_montserrat_14, C_DIM,
-              LV_ALIGN_TOP_LEFT, EGT_BAR_X + EGT_BAR_W + 4, EGT_BAR_Y - 4);
-    makeLabel(p, "350", &lv_font_montserrat_14, C_DIM,
-              LV_ALIGN_TOP_LEFT, EGT_BAR_X + EGT_BAR_W + 4, EGT_BAR_Y + EGT_BAR_H / 2 - 8);
-    makeLabel(p, "0", &lv_font_montserrat_14, C_DIM,
-              LV_ALIGN_TOP_LEFT, EGT_BAR_X + EGT_BAR_W + 4, EGT_BAR_Y + EGT_BAR_H - 12);
 
     // Curseur : maximum EGT enregistre durant la session
     wEgtMark = lv_obj_create(track);
@@ -305,40 +338,26 @@ void buildRacePage()
     lv_obj_set_style_bg_opa(wEgtMark, LV_OPA_COVER, 0);
     lv_obj_set_style_radius(wEgtMark, 2, 0);
 
-    // Valeur EGT en grand, a droite du bargraph
+    // Valeur EGT centree en haut
     wEgtLabel = makeLabel(p, "---", &lv_font_montserrat_48, C_GREEN,
-                          LV_ALIGN_TOP_LEFT, 140, 100);
+                          LV_ALIGN_TOP_MID, 0, 90);
 
-    // Vitesse au centre de la zone libre
-    wSpeedLabel = makeLabel(p, "0", &lv_font_montserrat_48, C_WHITE,
-                            LV_ALIGN_TOP_LEFT, 170, 200);
-    makeLabel(p, "km/h", &lv_font_montserrat_16, C_DIM,
-              LV_ALIGN_TOP_LEFT, 176, 254);
+    // Temps au tour courant, sous l'EGT
+    wLapCur = makeLabel(p, "--'--,--", &lv_font_montserrat_30, C_WHITE,
+                        LV_ALIGN_TOP_MID, 0, 160);
 
-    // Chronos (3 lignes max : courant / meilleur / precedent)
-    wLapCur = makeLabel(p, "TOUR      --:--.-", &lv_font_montserrat_22, C_WHITE,
-                        LV_ALIGN_BOTTOM_LEFT, 28, -86);
-    wLapBest = makeLabel(p, "MEILLEUR  --:--.-", &lv_font_montserrat_22, C_GREEN,
-                         LV_ALIGN_BOTTOM_LEFT, 28, -54);
-    wLapLast = makeLabel(p, "PREC.     --:--.-", &lv_font_montserrat_22, C_DIM,
-                         LV_ALIGN_BOTTOM_LEFT, 28, -22);
+    // Best / Last sur la meme ligne, en bas
+    wLapBest = makeLabel(p, "BEST   --'--,--", &lv_font_montserrat_22, C_WHITE,
+                         LV_ALIGN_BOTTOM_LEFT, 28, -34);
+    wLapLast = makeLabel(p, "LAST   --'--,--", &lv_font_montserrat_22, C_WHITE,
+                         LV_ALIGN_BOTTOM_RIGHT, -28, -34);
 
-    // Statut (aligne a droite de la pastille BLE)
-    wStatusLine = makeLabel(p, "", &lv_font_montserrat_14, C_DIM,
-                            LV_ALIGN_TOP_RIGHT, -110, 16);
-    lv_label_set_recolor(wStatusLine, true);
-
-    // Pastille BLE : fond vert si connecte, rouge sinon
-    wBleBadge = lv_label_create(p);
-    lv_label_set_text(wBleBadge, "BLE");
-    lv_obj_set_style_text_font(wBleBadge, &lv_font_montserrat_14, 0);
-    lv_obj_set_style_text_color(wBleBadge, C_BG, 0);
-    lv_obj_set_style_bg_color(wBleBadge, C_RED, 0);
-    lv_obj_set_style_bg_opa(wBleBadge, LV_OPA_COVER, 0);
-    lv_obj_set_style_radius(wBleBadge, 4, 0);
-    lv_obj_set_style_pad_hor(wBleBadge, 8, 0);
-    lv_obj_set_style_pad_ver(wBleBadge, 4, 0);
-    lv_obj_align(wBleBadge, LV_ALIGN_TOP_RIGHT, -16, 10);
+    // Badges en haut a droite : precision, GPS, SD, BLE
+    wGpsBadge = makeBadge(p, "GPS --", -128, 10, C_RED);
+    wSdBadge = makeBadge(p, "SD --", -64, 10, C_RED);
+    wBleBadge = makeBadge(p, "BLE", -16, 10, C_RED);
+    wAccLabel = makeLabel(p, "-- m", &lv_font_montserrat_14, C_DIM,
+                          LV_ALIGN_TOP_RIGHT, -215, 16);
 }
 
 // ---------------------------- Page TELEMETRIE ------------------------------
@@ -537,7 +556,7 @@ void alarmTick(const TelemetryFrame &f)
 void showPage(uint8_t idx)
 {
     if (idx > PAGE_SESSIONS) idx = 0;
-    for (int i = 0; i < 5; i++) {
+    for (int i = 0; i < NB_PAGES; i++) {
         if (i == idx) lv_obj_clear_flag(g_pages[i], LV_OBJ_FLAG_HIDDEN);
         else lv_obj_add_flag(g_pages[i], LV_OBJ_FLAG_HIDDEN);
     }
@@ -559,19 +578,17 @@ void updateRacePage(const TelemetryFrame &f, const ChronoState &c)
     int h = (int)(egt / 700.0f * EGT_BAR_H);
     lv_obj_set_height(wEgtFill, h);
     lv_obj_set_style_bg_color(wEgtFill, zc, 0);
-    if (hasEgt) lv_label_set_text_fmt(wEgtLabel, "%.0f", egt);
+    if (hasEgt) lv_label_set_text_fmt(wEgtLabel, "%.0f °c", egt);
     else lv_label_set_text(wEgtLabel, "---");
     lv_obj_set_style_text_color(wEgtLabel, zc, 0);
 
-    lv_label_set_text_fmt(wSpeedLabel, "%.0f", f.speed_kmh);
-
     char cur[16], best[16], last[16];
     fmtLap(c.current_lap_ms, cur, sizeof(cur));
-    lv_label_set_text_fmt(wLapCur, "TOUR      %s", cur);
+    lv_label_set_text(wLapCur, cur);
     fmtLap(c.best_lap_ms, best, sizeof(best));
-    lv_label_set_text_fmt(wLapBest, "MEILLEUR  %s", best);
+    lv_label_set_text_fmt(wLapBest, "BEST   %s", best);
     fmtLap(c.last_lap_ms, last, sizeof(last));
-    lv_label_set_text_fmt(wLapLast, "PREC.     %s", last);
+    lv_label_set_text_fmt(wLapLast, "LAST   %s", last);
 
     int markH = (int)(f.egt_max_c / 700.0f * EGT_BAR_H);
     if (markH < 0) markH = 0;
@@ -579,20 +596,23 @@ void updateRacePage(const TelemetryFrame &f, const ChronoState &c)
     lv_obj_align(wEgtMark, LV_ALIGN_BOTTOM_MID, 0, -markH);
 
     GpsFix g = gps_get();
-    const char *sdCol = sd_ready() ? "#22C55E" : "#EF4444";
-    const char *satCol;
-    if (!g.valid || g.sats < 4) satCol = "#EF4444";
-    else if (g.sats < 8) satCol = "#F59E0B";
-    else satCol = "#22C55E";
-
-    if (g.valid)
-        lv_label_set_text_fmt(wStatusLine, "%s %d sats#  #9CA3AF %.1fm#  %s SD %s#",
-                              satCol, g.sats, g.hdop * 2.5f, sdCol, sd_ready() ? "ok" : "--");
-    else
-        lv_label_set_text_fmt(wStatusLine, "#EF4444 GPS --#  %s SD %s#",
-                              sdCol, sd_ready() ? "ok" : "--");
-    lv_obj_align(wStatusLine, LV_ALIGN_TOP_RIGHT, -110, 16);
+    if (g.valid) {
+        lv_label_set_text_fmt(wGpsBadge, "%d sats", g.sats);
+        lv_color_t q = g.sats >= 8 ? C_GREEN : (g.sats >= 4 ? C_ORANGE : C_RED);
+        lv_obj_set_style_bg_color(wGpsBadge, q, 0);
+        lv_label_set_text_fmt(wAccLabel, "%.1fm", g.hdop * 2.5f);
+    } else {
+        lv_label_set_text(wGpsBadge, "GPS --");
+        lv_obj_set_style_bg_color(wGpsBadge, C_RED, 0);
+        lv_label_set_text(wAccLabel, "-- m");
+    }
+    lv_obj_align(wGpsBadge, LV_ALIGN_TOP_RIGHT, -128, 10);
+    lv_label_set_text_fmt(wSdBadge, "SD %s", sd_ready() ? "ok" : "--");
+    lv_obj_set_style_bg_color(wSdBadge, sd_ready() ? C_GREEN : C_RED, 0);
+    lv_obj_align(wSdBadge, LV_ALIGN_TOP_RIGHT, -64, 10);
     lv_obj_set_style_bg_color(wBleBadge, ble_connected() ? C_GREEN : C_RED, 0);
+    lv_obj_align(wBleBadge, LV_ALIGN_TOP_RIGHT, -16, 10);
+    lv_obj_align(wAccLabel, LV_ALIGN_TOP_RIGHT, -215, 16);
 }
 
 void updateTelemPage(const TelemetryFrame &f, const ChronoState &)
@@ -629,10 +649,10 @@ void updateDynoPage(const TelemetryFrame &f)
     lv_color_t zc;
     egtZoneColor(hasEgt ? f.egt_c : 0, zc);
 
-    if (hasEgt) lv_label_set_text_fmt(wDynoEgt, "%.0f °C", f.egt_c);
+    if (hasEgt) lv_label_set_text_fmt(wDynoEgt, "%.0f °c", f.egt_c);
     else lv_label_set_text(wDynoEgt, "---");
     lv_obj_set_style_text_color(wDynoEgt, zc, 0);
-    if (f.egt_max_c > 0) lv_label_set_text_fmt(wDynoEgtMax, "EGT MAX   %.0f °C", f.egt_max_c);
+    if (f.egt_max_c > 0) lv_label_set_text_fmt(wDynoEgtMax, "EGT MAX   %.0f °c", f.egt_max_c);
 
     lv_label_set_text_fmt(wDynoRpm, "%u", f.rpm);
     lv_label_set_text_fmt(wDynoP, "%.1f kW", f.power_kw);
