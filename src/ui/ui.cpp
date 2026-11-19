@@ -22,7 +22,8 @@ lv_color_t C_BG = lv_color_hex(0x000000);
 lv_color_t C_ACCENT = lv_color_hex(0x38BDF8);
 lv_color_t C_DIM = lv_color_hex(0x9CA3AF);
 
-enum PageId : uint8_t { PAGE_RACE = 0, PAGE_TELEM, PAGE_ENGINE, PAGE_SETTINGS, PAGE_SESSIONS };
+enum PageId : uint8_t { PAGE_RACE = 0, PAGE_TELEM, PAGE_ENGINE, PAGE_DYNO, PAGE_SETTINGS, PAGE_SESSIONS };
+static const uint8_t NB_PAGES = 6;
 
 lv_obj_t *g_pages[5];
 uint8_t g_pageIdx = PAGE_RACE;
@@ -36,6 +37,10 @@ lv_obj_t *wGZone, *wGDot, *wBankBar, *wBankLabel, *wGLongLabel, *wGLatLabel;
 
 // Moteur
 lv_obj_t *wRpmBar, *wRpmLabel, *wEgtMaxLabel, *wPowerLabel, *wTorqueLabel;
+
+// Banc d'essai
+lv_obj_t *wDynoEgt, *wDynoEgtMax, *wDynoRpm, *wDynoP, *wDynoC, *wDynoPMax, *wDynoCMax;
+float s_dynoPMax = 0, s_dynoCMax = 0;
 
 // Parametres
 lv_obj_t *wMassVal, *wCxsaVal, *wEtaVal, *wRadiusVal, *wLapLineLabel;
@@ -72,25 +77,31 @@ const char *fmtLap(uint32_t ms, char *buf, size_t len)
 // ----------------------------- Navigation ----------------------------------
 
 void showPage(uint8_t idx);
+void dynoRazCb(lv_event_t *e)
+{
+    (void)e;
+    s_dynoPMax = 0;
+    s_dynoCMax = 0;
+}
 
 void gestureCb(lv_event_t *e)
 {
     (void)e;
     lv_dir_t dir = lv_indev_get_gesture_dir(lv_indev_get_act());
-    if (dir == LV_DIR_LEFT) showPage((g_pageIdx + 1) % 5);
-    else if (dir == LV_DIR_RIGHT) showPage((g_pageIdx + 4) % 5);
+    if (dir == LV_DIR_LEFT) showPage((g_pageIdx + 1) % NB_PAGES);
+    else if (dir == LV_DIR_RIGHT) showPage((g_pageIdx + NB_PAGES - 1) % NB_PAGES);
 }
 
 void makeNavDots(lv_obj_t *page, uint8_t active)
 {
-    for (int i = 0; i < 5; i++) {
+    for (int i = 0; i < NB_PAGES; i++) {
         lv_obj_t *dot = lv_obj_create(page);
         lv_obj_remove_style_all(dot);
         lv_obj_set_size(dot, 8, 8);
         lv_obj_set_style_radius(dot, LV_RADIUS_CIRCLE, 0);
         lv_obj_set_style_bg_color(dot, i == active ? C_ACCENT : C_GRAY, 0);
         lv_obj_set_style_bg_opa(dot, LV_OPA_COVER, 0);
-        lv_obj_align(dot, LV_ALIGN_TOP_MID, -48 + i * 24, 14);
+        lv_obj_align(dot, LV_ALIGN_TOP_MID, -(int)((NB_PAGES - 1) * 12) + i * 24, 14);
     }
 }
 
@@ -313,8 +324,9 @@ void buildRacePage()
     lv_obj_set_style_bg_opa(wRecDot, LV_OPA_COVER, 0);
     lv_obj_align(wRecDot, LV_ALIGN_TOP_LEFT, 18, 14);
 
-    wStatusLine = makeLabel(p, "GPS --  BAT --", &lv_font_montserrat_14, C_DIM,
+    wStatusLine = makeLabel(p, "", &lv_font_montserrat_14, C_DIM,
                             LV_ALIGN_TOP_RIGHT, -16, 10);
+    lv_label_set_recolor(wStatusLine, true);
 }
 
 // ---------------------------- Page TELEMETRIE ------------------------------
@@ -395,6 +407,38 @@ void buildEnginePage()
               LV_ALIGN_BOTTOM_LEFT, 250, -136);
     wTorqueLabel = makeLabel(p, "0.0 Nm", &lv_font_montserrat_26, C_GREEN,
                              LV_ALIGN_BOTTOM_LEFT, 250, -106);
+}
+
+// ----------------------------- Page BANC D'ESSAI ----------------------------
+
+void buildDynoPage()
+{
+    lv_obj_t *p = newPage("BANC", PAGE_DYNO);
+
+    makeLabel(p, "EGT", &lv_font_montserrat_16, C_DIM, LV_ALIGN_TOP_LEFT, 40, 66);
+    wDynoEgt = makeLabel(p, "---", &lv_font_montserrat_48, C_GREEN,
+                         LV_ALIGN_TOP_LEFT, 40, 90);
+    wDynoEgtMax = makeLabel(p, "EGT MAX   ---", &lv_font_montserrat_20, C_ORANGE,
+                            LV_ALIGN_TOP_LEFT, 40, 152);
+
+    makeLabel(p, "REGIME", &lv_font_montserrat_16, C_DIM, LV_ALIGN_TOP_LEFT, 260, 66);
+    wDynoRpm = makeLabel(p, "0", &lv_font_montserrat_48, C_WHITE,
+                         LV_ALIGN_TOP_LEFT, 260, 90);
+    makeLabel(p, "tr/min", &lv_font_montserrat_14, C_DIM, LV_ALIGN_TOP_LEFT, 264, 144);
+
+    makeLabel(p, "PUISSANCE", &lv_font_montserrat_16, C_DIM, LV_ALIGN_TOP_LEFT, 40, 216);
+    wDynoP = makeLabel(p, "-- kW", &lv_font_montserrat_36, C_WHITE,
+                       LV_ALIGN_TOP_LEFT, 40, 240);
+    wDynoPMax = makeLabel(p, "P MAX   -- kW", &lv_font_montserrat_20, C_ACCENT,
+                          LV_ALIGN_TOP_LEFT, 40, 288);
+
+    makeLabel(p, "COUPLE", &lv_font_montserrat_16, C_DIM, LV_ALIGN_TOP_LEFT, 40, 344);
+    wDynoC = makeLabel(p, "-- Nm", &lv_font_montserrat_36, C_WHITE,
+                       LV_ALIGN_TOP_LEFT, 40, 368);
+    wDynoCMax = makeLabel(p, "C MAX   -- Nm", &lv_font_montserrat_20, C_ACCENT,
+                          LV_ALIGN_TOP_LEFT, 40, 416);
+
+    makeButton(p, "RAZ MAX", LV_ALIGN_BOTTOM_RIGHT, -20, -20, dynoRazCb);
 }
 
 // ----------------------------- Page SESSIONS -------------------------------
@@ -520,8 +564,18 @@ void updateRacePage(const TelemetryFrame &f, const ChronoState &c)
     lv_obj_set_style_bg_color(wRecDot, f.recording ? C_RED : C_GRAY, 0);
 
     GpsFix g = gps_get();
-    lv_label_set_text_fmt(wStatusLine, "GPS %s  %d sats  HDOP %.1f  SD %s",
-                          g.valid ? "OK" : "--", g.sats, g.hdop, sd_ready() ? "OK" : "--");
+    const char *sdCol = sd_ready() ? "#22C55E" : "#EF4444";
+    const char *satCol;
+    if (!g.valid || g.sats < 4) satCol = "#EF4444";
+    else if (g.sats < 8) satCol = "#F59E0B";
+    else satCol = "#22C55E";
+
+    if (g.valid)
+        lv_label_set_text_fmt(wStatusLine, "%s %d sats#  #9CA3AF %.1fm#  %s SD %s#",
+                              satCol, g.sats, g.hdop * 2.5f, sdCol, sd_ready() ? "ok" : "--");
+    else
+        lv_label_set_text_fmt(wStatusLine, "#EF4444 GPS --#  %s SD %s#",
+                              sdCol, sd_ready() ? "ok" : "--");
 }
 
 void updateTelemPage(const TelemetryFrame &f, const ChronoState &)
@@ -552,6 +606,24 @@ void updateEnginePage(const TelemetryFrame &f)
     lv_label_set_text_fmt(wTorqueLabel, "%.1f Nm", f.torque_nm);
 }
 
+void updateDynoPage(const TelemetryFrame &f)
+{
+    bool hasEgt = f.egt_c >= 0;
+    lv_color_t zc;
+    egtZoneColor(hasEgt ? f.egt_c : 0, zc);
+
+    if (hasEgt) lv_label_set_text_fmt(wDynoEgt, "%.0f °C", f.egt_c);
+    else lv_label_set_text(wDynoEgt, "---");
+    lv_obj_set_style_text_color(wDynoEgt, zc, 0);
+    if (f.egt_max_c > 0) lv_label_set_text_fmt(wDynoEgtMax, "EGT MAX   %.0f °C", f.egt_max_c);
+
+    lv_label_set_text_fmt(wDynoRpm, "%u", f.rpm);
+    lv_label_set_text_fmt(wDynoP, "%.1f kW", f.power_kw);
+    lv_label_set_text_fmt(wDynoC, "%.1f Nm", f.torque_nm);
+    if (s_dynoPMax > 0) lv_label_set_text_fmt(wDynoPMax, "P MAX   %.1f kW", s_dynoPMax);
+    if (s_dynoCMax > 0) lv_label_set_text_fmt(wDynoCMax, "C MAX   %.1f Nm", s_dynoCMax);
+}
+
 void updateSessionsPage(const TelemetryFrame &f)
 {
     lv_obj_set_style_bg_color(wRecBtn, f.recording ? C_RED : C_GREEN, 0);
@@ -564,10 +636,13 @@ void uiTimer(lv_timer_t *)
     TelemetryFrame f = telemetry_get();
     ChronoState c = chrono_get();
     alarmTick(f);
+    if (f.power_kw > s_dynoPMax) s_dynoPMax = f.power_kw;
+    if (f.torque_nm > s_dynoCMax) s_dynoCMax = f.torque_nm;
     switch (g_pageIdx) {
     case PAGE_RACE: updateRacePage(f, c); break;
     case PAGE_TELEM: updateTelemPage(f, c); break;
     case PAGE_ENGINE: updateEnginePage(f); break;
+    case PAGE_DYNO: updateDynoPage(f); break;
     case PAGE_SETTINGS: break;
     case PAGE_SESSIONS: updateSessionsPage(f); break;
     }
@@ -594,6 +669,7 @@ void ui_start()
     buildRacePage();
     buildTelemPage();
     buildEnginePage();
+    buildDynoPage();
     buildSettingsPage();
     buildSessionsPage();
     showPage(PAGE_RACE);

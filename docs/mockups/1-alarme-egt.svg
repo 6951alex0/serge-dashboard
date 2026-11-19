@@ -10,7 +10,7 @@
   <circle cx="344" cy="74" r="4" fill="#6B7280"/>
   <circle cx="368" cy="74" r="4" fill="#6B7280"/>
   <text x="280" y="92" fill="#6B7280" font-size="14" text-anchor="middle" font-family='Montserrat, Arial, sans-serif'>COURSE</text>
-  <text x="504" y="80" fill="#9CA3AF" font-size="13" text-anchor="end" font-family='Montserrat, Arial, sans-serif'>GPS OK  12 sats  HDOP 0.8  SD OK</text>
+  <text x="504" y="80" fill="#000000" font-size="13" text-anchor="end" font-family='Montserrat, Arial, sans-serif'><tspan>#000000 12 sats</tspan>  <tspan>2.0m</tspan>  <tspan>SD ok</tspan></text>
   <rect x="74" y="124" width="34" height="300" rx="4" fill="#1F2937"/>
   <rect x="74" y="138" width="34" height="286" rx="4" fill="#EF4444"/>
   <text x="116" y="134" fill="#9CA3AF" font-size="13" font-family='Montserrat, Arial, sans-serif'>700</text>
