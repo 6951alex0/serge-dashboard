@@ -65,6 +65,27 @@
 // Bouton utilisateur Key3 (option : manual lap trigger)
 #define USER_BTN_PIN 18
 
+// ------------------------- Montage / orientation ---------------------------
+// L'écran est monté pivoté de 90° vers la GAUCHE (boutons physiques à gauche,
+// USB à droite, microSD à l'avant). LVGL tourne alors le rendu ET les
+// coordonnées tactiles automatiquement (sw_rotate).
+// Si après flash le sens s'avère inversé (test réel), mettre 0 pour revenir
+// à l'orientation portrait.
+#define UI_ROTATED_90CCW 1
+
+// Calibration tactile brute (implémentation officielle Waveshare, révision
+// actuelle de la carte) : ajuster si le toucher est inversé en X/Y.
+#define TOUCH_SWAP_XY 1
+#define TOUCH_MIRROR_X 1
+#define TOUCH_MIRROR_Y 0
+
+// ------------------------------ Alarme EGT ---------------------------------
+// Clignotement du fond d'écran (orange) quand l'EGT dépasse ce seuil.
+// Zone ROUGE de la jauge = 600 °C : l'alarme signifie "passage en dur danger".
+#define EGT_ALARM_C 650.0f
+#define EGT_ALARM_HYST_C 15.0f   // retour sous (seuil - hystérésis) pour stopper
+#define EGT_ALARM_PERIOD_MS 250
+
 // ------------------------------ Acquisition -------------------------------
 #define ACQ_PERIOD_MS 50            // 20 Hz
 #define IMU_ODR_HZ 250              // ODR QMI8658 (>= fréquence d'échantillonnage)

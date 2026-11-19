@@ -24,7 +24,7 @@ void IRAM_ATTR rpmEdge()
     // Saturer la difference theorique si wrap (improbable : 71 min)
     g_prevUs = g_lastUs;
     g_lastUs = now;
-    g_count++;
+    g_count = g_count + 1u;
     portEXIT_CRITICAL_ISR(&g_mux);
 }
 

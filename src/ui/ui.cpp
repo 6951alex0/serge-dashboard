@@ -427,6 +427,36 @@ void buildSessionsPage()
     refreshSessionList();
 }
 
+// ------------------------------ Alarme EGT ---------------------------------
+
+void alarmTick(const TelemetryFrame &f)
+{
+    static bool alarmed = false;
+    static bool phase = false;
+    static uint32_t lastToggle = 0;
+
+    if (!alarmed && f.egt_c >= EGT_ALARM_C) {
+        alarmed = true;
+        phase = true;
+    } else if (alarmed && f.egt_c < EGT_ALARM_C - EGT_ALARM_HYST_C) {
+        alarmed = false;
+    }
+
+    lv_color_t bg = C_BG;
+    if (alarmed) {
+        // "orange flash" : fond alternance orange / noir toutes les 250 ms
+        uint32_t now = millis();
+        if (now - lastToggle >= EGT_ALARM_PERIOD_MS) {
+            lastToggle = now;
+            phase = !phase;
+        }
+        if (phase) bg = lv_color_hex(0xFF8C00);
+    }
+    for (int i = 0; i < 5; i++) {
+        lv_obj_set_style_bg_color(g_pages[i], bg, 0);
+    }
+}
+
 // ------------------------------ Page switching -----------------------------
 
 void showPage(uint8_t idx)
@@ -509,6 +539,7 @@ void uiTimer(lv_timer_t *)
 {
     TelemetryFrame f = telemetry_get();
     ChronoState c = chrono_get();
+    alarmTick(f);
     switch (g_pageIdx) {
     case PAGE_RACE: updateRacePage(f, c); break;
     case PAGE_TELEM: updateTelemPage(f, c); break;

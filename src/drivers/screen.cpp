@@ -95,9 +95,10 @@ bool screen_begin()
         Serial.println("[screen] tactile CST9220 introuvable");
     } else {
         g_touch.setMaxCoordinates(LCD_WIDTH, LCD_HEIGHT);
-        // Mapping du panneau rond (motif officiel Waveshare, rotation 0)
-        g_touch.setSwapXY(true);
-        g_touch.setMirrorXY(true, false);
+        // Mapping du panneau rond (calibrable dans config.h ; valeurs
+        // issues du motif officiel Waveshare, révision actuelle)
+        g_touch.setSwapXY(TOUCH_SWAP_XY);
+        g_touch.setMirrorXY(TOUCH_MIRROR_X, TOUCH_MIRROR_Y);
         pinMode(TP_INT, INPUT_PULLUP);
         attachInterrupt(digitalPinToInterrupt(TP_INT), touchIsr, FALLING);
     }
@@ -130,6 +131,12 @@ void screen_lvgl_register()
     dispDrv.flush_cb = lvgl_flush_cb;
     dispDrv.rounder_cb = lvgl_rounder_cb;
     dispDrv.draw_buf = &g_drawBuf;
+#if UI_ROTATED_90CCW
+    // Panneau monté pivoté 90° vers la gauche : LVGL tourne le rendu
+    // ET les points tactiles (lv_indev transforme les coordonnées).
+    dispDrv.sw_rotate = 1;
+    dispDrv.rotated = LV_DISP_ROT_90;
+#endif
     lv_disp_drv_register(&dispDrv);
 
     static lv_indev_drv_t indevDrv;
