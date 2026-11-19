@@ -36,6 +36,7 @@ void commitFromParser(uint32_t msNow)
     fix.heading_deg = g_parser.course.isValid() ? (float)g_parser.course.deg() : 0;
     fix.speed_mps = g_parser.speed.isValid() ? (float)g_parser.speed.mps() : 0;
     fix.sats = g_parser.satellites.isValid() ? (int8_t)g_parser.satellites.value() : 0;
+    fix.hdop = g_parser.hdop.isValid() ? (float)g_parser.hdop.value() / 100.0f : 99.9f;
     if (g_parser.date.isValid() && g_parser.time.isValid()) {
         g_year = g_parser.date.year();
         g_month = g_parser.date.month();

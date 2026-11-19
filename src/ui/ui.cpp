@@ -28,7 +28,7 @@ lv_obj_t *g_pages[5];
 uint8_t g_pageIdx = PAGE_RACE;
 
 // Course
-lv_obj_t *wSpeedLabel, *wEgtArc, *wEgtLabel, *wLapCur, *wLapBest, *wLapLast;
+lv_obj_t *wSpeedLabel, *wEgtFill, *wEgtLabel, *wLapCur, *wLapBest, *wLapLast;
 lv_obj_t *wRecDot, *wStatusLine;
 
 // Telemetrie
@@ -254,36 +254,55 @@ void buildRacePage()
 {
     lv_obj_t *p = newPage("COURSE", PAGE_RACE);
 
-    // Jauge EGT (arc 270 deg, zones verte/orange/rouge 0-700 C)
-    wEgtArc = lv_arc_create(p);
-    lv_obj_set_size(wEgtArc, 330, 330);
-    lv_obj_align(wEgtArc, LV_ALIGN_CENTER, 0, -66);
-    lv_arc_set_rotation(wEgtArc, 135);
-    lv_arc_set_bg_angles(wEgtArc, 0, 270);
-    lv_arc_set_range(wEgtArc, 0, 700);
-    lv_arc_set_value(wEgtArc, 0);
-    lv_obj_remove_style(wEgtArc, nullptr, LV_PART_KNOB);
-    lv_obj_clear_flag(wEgtArc, LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_set_style_arc_width(wEgtArc, 16, LV_PART_MAIN);
-    lv_obj_set_style_arc_width(wEgtArc, 16, LV_PART_INDICATOR);
-    lv_obj_set_style_arc_color(wEgtArc, lv_color_hex(0x1F2937), LV_PART_MAIN);
-    lv_obj_set_style_arc_color(wEgtArc, C_GREEN, LV_PART_INDICATOR);
+    // Bargraph EGT vertical le long du bord gauche (echelle 0-700 C)
+    const int EGT_BAR_X = 34;
+    const int EGT_BAR_Y = 64;
+    const int EGT_BAR_W = 34;
+    const int EGT_BAR_H = 300;
 
-    wEgtLabel = makeLabel(wEgtArc, "EGT --- C", &lv_font_montserrat_22, C_GREEN,
-                          LV_ALIGN_CENTER, 0, 0);
+    lv_obj_t *track = lv_obj_create(p);
+    lv_obj_remove_style_all(track);
+    lv_obj_set_pos(track, EGT_BAR_X, EGT_BAR_Y);
+    lv_obj_set_size(track, EGT_BAR_W, EGT_BAR_H);
+    lv_obj_set_style_bg_color(track, lv_color_hex(0x1F2937), 0);
+    lv_obj_set_style_bg_opa(track, LV_OPA_COVER, 0);
+    lv_obj_set_style_radius(track, 4, 0);
+    lv_obj_clear_flag(track, LV_OBJ_FLAG_SCROLLABLE);
 
-    // Vitesse centrale
+    wEgtFill = lv_obj_create(track);
+    lv_obj_remove_style_all(wEgtFill);
+    lv_obj_set_size(wEgtFill, EGT_BAR_W, 0);
+    lv_obj_align(wEgtFill, LV_ALIGN_BOTTOM_MID, 0, 0);
+    lv_obj_set_style_bg_color(wEgtFill, C_GREEN, 0);
+    lv_obj_set_style_bg_opa(wEgtFill, LV_OPA_COVER, 0);
+    lv_obj_set_style_radius(wEgtFill, 4, 0);
+
+    makeLabel(p, "700", &lv_font_montserrat_14, C_DIM,
+              LV_ALIGN_TOP_LEFT, EGT_BAR_X + EGT_BAR_W + 4, EGT_BAR_Y - 4);
+    makeLabel(p, "350", &lv_font_montserrat_14, C_DIM,
+              LV_ALIGN_TOP_LEFT, EGT_BAR_X + EGT_BAR_W + 4, EGT_BAR_Y + EGT_BAR_H / 2 - 8);
+    makeLabel(p, "0", &lv_font_montserrat_14, C_DIM,
+              LV_ALIGN_TOP_LEFT, EGT_BAR_X + EGT_BAR_W + 4, EGT_BAR_Y + EGT_BAR_H - 12);
+
+    // Valeur EGT en grand, a droite du bargraph
+    makeLabel(p, "EGT", &lv_font_montserrat_16, C_DIM,
+              LV_ALIGN_TOP_LEFT, 140, 78);
+    wEgtLabel = makeLabel(p, "---", &lv_font_montserrat_48, C_GREEN,
+                          LV_ALIGN_TOP_LEFT, 140, 100);
+
+    // Vitesse au centre de la zone libre
     wSpeedLabel = makeLabel(p, "0", &lv_font_montserrat_48, C_WHITE,
-                            LV_ALIGN_CENTER, 0, 172);
-    makeLabel(p, "km/h", &lv_font_montserrat_14, C_DIM, LV_ALIGN_CENTER, 0, 210);
+                            LV_ALIGN_TOP_LEFT, 170, 200);
+    makeLabel(p, "km/h", &lv_font_montserrat_16, C_DIM,
+              LV_ALIGN_TOP_LEFT, 176, 254);
 
     // Chronos (3 lignes max : courant / meilleur / precedent)
-    wLapCur = makeLabel(p, "TOUR      --:--.-", &lv_font_montserrat_20, C_WHITE,
-                        LV_ALIGN_BOTTOM_LEFT, 24, -100);
-    wLapBest = makeLabel(p, "MEILLEUR  --:--.-", &lv_font_montserrat_20, C_GREEN,
-                         LV_ALIGN_BOTTOM_LEFT, 24, -66);
-    wLapLast = makeLabel(p, "PREC.     --:--.-", &lv_font_montserrat_20, C_DIM,
-                         LV_ALIGN_BOTTOM_LEFT, 24, -32);
+    wLapCur = makeLabel(p, "TOUR      --:--.-", &lv_font_montserrat_22, C_WHITE,
+                        LV_ALIGN_BOTTOM_LEFT, 28, -86);
+    wLapBest = makeLabel(p, "MEILLEUR  --:--.-", &lv_font_montserrat_22, C_GREEN,
+                         LV_ALIGN_BOTTOM_LEFT, 28, -54);
+    wLapLast = makeLabel(p, "PREC.     --:--.-", &lv_font_montserrat_22, C_DIM,
+                         LV_ALIGN_BOTTOM_LEFT, 28, -22);
 
     // REC + statut
     wRecDot = lv_obj_create(p);
@@ -477,10 +496,15 @@ void updateRacePage(const TelemetryFrame &f, const ChronoState &c)
     bool hasEgt = f.egt_c >= 0;
     lv_color_t zc;
     egtZoneColor(hasEgt ? f.egt_c : 0, zc);
-    lv_arc_set_value(wEgtArc, hasEgt ? (int)(f.egt_c > 700 ? 700 : f.egt_c) : 0);
-    lv_obj_set_style_arc_color(wEgtArc, zc, LV_PART_INDICATOR);
-    if (hasEgt) lv_label_set_text_fmt(wEgtLabel, "EGT %.0f C", f.egt_c);
-    else lv_label_set_text(wEgtLabel, "EGT --- C");
+    static const int EGT_BAR_H = 300;
+    float egt = hasEgt ? f.egt_c : 0.0f;
+    if (egt < 0) egt = 0;
+    if (egt > 700) egt = 700;
+    int h = (int)(egt / 700.0f * EGT_BAR_H);
+    lv_obj_set_height(wEgtFill, h);
+    lv_obj_set_style_bg_color(wEgtFill, zc, 0);
+    if (hasEgt) lv_label_set_text_fmt(wEgtLabel, "%.0f", egt);
+    else lv_label_set_text(wEgtLabel, "---");
     lv_obj_set_style_text_color(wEgtLabel, zc, 0);
 
     lv_label_set_text_fmt(wSpeedLabel, "%.0f", f.speed_kmh);
@@ -496,8 +520,8 @@ void updateRacePage(const TelemetryFrame &f, const ChronoState &c)
     lv_obj_set_style_bg_color(wRecDot, f.recording ? C_RED : C_GRAY, 0);
 
     GpsFix g = gps_get();
-    lv_label_set_text_fmt(wStatusLine, "GPS %s sats %d  SD %s",
-                          g.valid ? "OK" : "--", g.sats, sd_ready() ? "OK" : "--");
+    lv_label_set_text_fmt(wStatusLine, "GPS %s  %d sats  HDOP %.1f  SD %s",
+                          g.valid ? "OK" : "--", g.sats, g.hdop, sd_ready() ? "OK" : "--");
 }
 
 void updateTelemPage(const TelemetryFrame &f, const ChronoState &)

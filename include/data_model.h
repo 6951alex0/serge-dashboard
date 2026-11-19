@@ -72,6 +72,7 @@ struct GpsFix {
     float heading_deg;
     float speed_mps;
     int8_t sats;
+    float hdop;                 // dilution de precision (< 1 excellent, > 2 moyen)
     uint16_t year;
     uint8_t month, day, hour, minute, second;
 };
