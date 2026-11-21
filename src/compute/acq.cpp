@@ -12,6 +12,7 @@
 #include "drivers/pmu.h"
 
 namespace {
+static float g_egtMax = 0;
 
 float g_speedFilt = 0;        // m/s
 float g_gLatFilt = 0;
@@ -106,8 +107,7 @@ void acqTask(void *param)
         }
 
         // ---------------- EGT max ----------------
-        static float egtMax = 0;
-        if (egt > egtMax) egtMax = egt;
+        if (egt > g_egtMax) g_egtMax = egt;
 
         // ---------------- Chrono GPS ----------------
         lap_timer_tick(nowMs, gps);
@@ -149,7 +149,7 @@ void acqTask(void *param)
         f.speed_kmh = g_speedFilt * 3.6f;
         f.speed_mps = g_speedFilt;
         f.egt_c = egt;
-        f.egt_max_c = egtMax;
+        f.egt_max_c = g_egtMax;
         f.rpm = rpm;
         f.g_long = g_gLongDeriv;
         f.g_lat = g_gLatFilt;
@@ -198,4 +198,9 @@ void acq_calibrateFlat()
     g_prevSpeedMps = 0;
     g_gLongDeriv = 0;
     g_powerFilt = 0;
+}
+
+void acq_resetMaxima()
+{
+    g_egtMax = 0;
 }

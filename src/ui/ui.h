@@ -1,4 +1,4 @@
 #pragma once
-// Interface LVGL : 5 pages (Course, Telemetrie, Moteur, Parametres, Sessions).
+// Interface LVGL : 4 pages en tileview (Piste, G-Force, Banc d'essai, Parametrage).
 
 void ui_start();

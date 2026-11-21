@@ -80,11 +80,10 @@
 #define TOUCH_MIRROR_Y 0
 
 // ------------------------------ Alarme EGT ---------------------------------
-// Clignotement du fond d'écran (orange) quand l'EGT dépasse ce seuil.
-// Zone ROUGE de la jauge = 600 °C : l'alarme signifie "passage en dur danger".
-#define EGT_ALARM_C 650.0f
-#define EGT_ALARM_HYST_C 15.0f   // retour sous (seuil - hystérésis) pour stopper
-#define EGT_ALARM_PERIOD_MS 250
+// Pas de flash plein ecran : ALERTE = couleur du chiffre EGT uniquement.
+// vert par defaut / orange >= EGT_ORANGE_C / rouge >= EGT_RED_C.
+#define EGT_ORANGE_C 550.0f
+#define EGT_RED_C 630.0f
 
 // ------------------------------ Acquisition -------------------------------
 #define ACQ_PERIOD_MS 50            // 20 Hz

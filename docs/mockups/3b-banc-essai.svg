@@ -3,26 +3,14 @@
   <rect x="30" y="20" width="500" height="560" rx="18" fill="#1b2530"/>
   <rect x="40" y="60" width="480" height="480" fill="#000000"/>
   <rect x="40" y="60" width="480" height="480" fill="none" stroke="#31404f" stroke-width="4"/>
-  <circle cx="260" cy="74" r="4" fill="#6B7280"/>
-  <circle cx="284" cy="74" r="4" fill="#6B7280"/>
-  <circle cx="308" cy="74" r="4" fill="#6B7280"/>
-  <circle cx="332" cy="74" r="4" fill="#38BDF8"/>
-  <circle cx="356" cy="74" r="4" fill="#6B7280"/>
-  <circle cx="380" cy="74" r="4" fill="#6B7280"/>
-  <text x="280" y="92" fill="#6B7280" font-size="14" text-anchor="middle" font-family='Montserrat, Arial, sans-serif'>BANC</text>
-  <text x="80" y="136" fill="#9CA3AF" font-size="16" font-family='Montserrat, Arial, sans-serif'>EGT</text>
-  <text x="80" y="194" fill="#F59E0B" font-size="48" font-weight="bold" font-family='Montserrat, Arial, sans-serif'>622 &#176;C</text>
-  <text x="80" y="226" fill="#F59E0B" font-size="20" font-family='Montserrat, Arial, sans-serif'>EGT MAX   674 &#176;C</text>
-  <text x="300" y="136" fill="#9CA3AF" font-size="16" font-family='Montserrat, Arial, sans-serif'>REGIME</text>
-  <text x="300" y="194" fill="#FFFFFF" font-size="48" font-weight="bold" font-family='Montserrat, Arial, sans-serif'>9420</text>
-  <text x="304" y="216" fill="#9CA3AF" font-size="14" font-family='Montserrat, Arial, sans-serif'>tr/min</text>
-  <text x="80" y="288" fill="#9CA3AF" font-size="16" font-family='Montserrat, Arial, sans-serif'>PUISSANCE</text>
-  <text x="80" y="326" fill="#FFFFFF" font-size="36" font-weight="bold" font-family='Montserrat, Arial, sans-serif'>18.4 kW</text>
-  <text x="80" y="358" fill="#38BDF8" font-size="20" font-family='Montserrat, Arial, sans-serif'>P MAX   19.1 kW</text>
-  <text x="80" y="416" fill="#9CA3AF" font-size="16" font-family='Montserrat, Arial, sans-serif'>COUPLE</text>
-  <text x="80" y="454" fill="#FFFFFF" font-size="36" font-weight="bold" font-family='Montserrat, Arial, sans-serif'>23.7 Nm</text>
-  <text x="80" y="486" fill="#38BDF8" font-size="20" font-family='Montserrat, Arial, sans-serif'>C MAX   24.2 Nm</text>
-  <rect x="350" y="460" width="150" height="60" rx="10" fill="#1F2937"/>
-  <text x="425" y="498" fill="#FFFFFF" font-size="18" text-anchor="middle" font-family='Montserrat, Arial, sans-serif'>RAZ MAX</text>
-  <text x="30" y="588" fill="#8fa3b2" font-size="13" font-family='Montserrat, Arial, sans-serif'>Page BANC - EGT + regime, P et couple max estimes (RAZ MAX remet les compteurs a zero)</text>
+  <text x="280" y="104" fill="#00E676" font-size="26" font-weight="bold" text-anchor="middle" font-family='Montserrat, Arial, sans-serif'>MODE BANC D'ESSAI</text>
+  <text x="75" y="181" fill="#FFFFFF" font-size="48" font-weight="bold" font-family='Montserrat, Arial, sans-serif'>31.4 ch</text>
+  <text x="290" y="181" fill="#00E5FF" font-size="48" font-weight="bold" font-family='Montserrat, Arial, sans-serif'>24.6 Nm</text>
+  <rect x="70" y="230" width="420" height="200" rx="5" fill="#141414" stroke="#F58220" stroke-width="2"/>
+  <text x="85" y="275" fill="#00E676" font-size="30" font-family='Montserrat, Arial, sans-serif'>P. MAX  : 43.2 ch</text>
+  <text x="85" y="330" fill="#00E5FF" font-size="30" font-family='Montserrat, Arial, sans-serif'>C. MAX  : 29.8 Nm</text>
+  <text x="85" y="385" fill="#F58220" font-size="30" font-family='Montserrat, Arial, sans-serif'>EGT MAX : 618 &#176;c</text>
+  <rect x="150" y="460" width="260" height="55" rx="6" fill="#D32F2F"/>
+  <text x="280.0" y="495.9" fill="#FFFFFF" font-size="24" font-weight="bold" text-anchor="middle" font-family='Montserrat, Arial, sans-serif'>RAZ PICS BANC</text>
+  <text x="30" y="588" fill="#8fa3b2" font-size="13" font-family='Montserrat, Arial, sans-serif'>Page BANC D'ESSAI - puissance (ch) / couple (Nm) temps reel, pics max, RAZ</text>
 </svg>

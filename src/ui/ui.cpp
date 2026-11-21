@@ -1,791 +1,581 @@
+// ---------------------------------------------------------------------------
+// Interface LVGL — calquee sur le design utilisateur (sketch de reference).
+// 4 pages pleine page en tileview, fond noir pur :
+//   Piste    : bargraph EGT en equerre arrondie (degrade continu) + chronos
+//   G-Force  : cible + point dynamique, Lat/Lon, RPM, km/h
+//   Banc     : puissance / couple + pics max + RAZ
+//   Parametrage : Poids, S.Cx, tare IMU, ligne chrono GPS, record SD
+// ---------------------------------------------------------------------------
 #include "ui.h"
 #include <Arduino.h>
 #include <lvgl.h>
 #include <cstdio>
 #include <cstring>
-#include <string>
+#include <cmath>
+#include <esp_heap_caps.h>
 #include "config.h"
 #include "data_model.h"
 #include "drivers/screen.h"
 #include "compute/acq.h"
 #include "ble/ble_server.h"
 #include "storage/sd_logger.h"
-#include "sensors/gps.h"
 
 namespace {
 
-lv_color_t C_GREEN = lv_color_hex(0x22C55E);
-lv_color_t C_ORANGE = lv_color_hex(0xF59E0B);
-lv_color_t C_RED = lv_color_hex(0xEF4444);
-lv_color_t C_GRAY = lv_color_hex(0x6B7280);
-lv_color_t C_WHITE = lv_color_hex(0xFFFFFF);
-lv_color_t C_BG = lv_color_hex(0x000000);
-lv_color_t C_ACCENT = lv_color_hex(0x38BDF8);
-lv_color_t C_DIM = lv_color_hex(0x9CA3AF);
+// ------------------------------ Palette -------------------------------------
+const lv_color_t CL_GREEN  = lv_color_hex(0x00E676);
+const lv_color_t CL_ORANGE = lv_color_hex(0xF58220);
+const lv_color_t CL_RED    = lv_color_hex(0xFF1744);
+const lv_color_t CL_YELLOW = lv_color_hex(0xF5C542);
+const lv_color_t CL_BADGED = lv_color_hex(0xE53935);
+const lv_color_t CL_CYAN   = lv_color_hex(0x00E5FF);
+const lv_color_t CL_WHITE  = lv_color_hex(0xFFFFFF);
+const lv_color_t CL_BLACK  = lv_color_hex(0x000000);
 
-// Trace coude du bargraph EGT (page course) : bord gauche puis bord haut
-// Bargraph EGT coude a coude arrondi (page course) :
-// branche verticale le long du bord gauche, quart de cercle dans le coin
-// haut-gauche, branche horizontale le long du bord haut.
-const int EGT_R_IN = 40;                 // rayon interieur du coude arrondi
-const int EGT_R_OUT = 66;                // rayon exterieur du coude
-const int EGT_BAR = EGT_R_OUT - EGT_R_IN;// epaisseur de la bande (26)
-const int EGT_CX = EGT_R_OUT;            // centre du coude (66,66)
-const int EGT_CY = EGT_R_OUT;
-const int EGT_V_BOT = 324;               // bas de la branche verticale = 0 c
-const int EGT_LEN_V = EGT_V_BOT - EGT_CY;                          // 258 px
-const int EGT_H_END = 340;               // fin de la branche horizontale = 700 c
-const int EGT_LEN_ELB = (int)(3.14159f / 2.0f * (EGT_R_IN + EGT_R_OUT) / 2.0f); // ~83 px
-const int EGT_LEN_H = EGT_H_END - EGT_CX;                          // 274 px
-const int EGT_LEN_TOT = EGT_LEN_V + EGT_LEN_ELB + EGT_LEN_H;       // 615 px
-const int EGT_GRN_END = (int)(500.0f / 700 * EGT_LEN_TOT);         // 439
-const int EGT_ORA_END = (int)(600.0f / 700 * EGT_LEN_TOT);         // 527
+// ------------------- Equerre EGT (canvas degrade continu) -------------------
+// Canvas 240x310 place en (8,8). Coude quart de cercle centre (60,60) :
+//   branche verticale x 0..26  (bas y=309 -> coude y=60)
+//   coude : anneau r34..r60 autour de (60,60), quadrant haut-gauche
+//   branche horizontale y 0..26 (coude x=60 -> x=227)
+// Graduent continu le long du chemin, plage 300..700 C.
+const int EQ_W = 240, EQ_H = 310;
+const int EQ_CX = 60, EQ_CY = 60;
+const int EQ_R_IN = 34, EQ_R_OUT = 60;
+const float EQ_MID_R = (EQ_R_IN + EQ_R_OUT) / 2.0f;          // 47
+const float EQ_VERT_LEN = (EQ_H - 1) - EQ_CY;                 // 249
+const float EQ_ARC_LEN = 1.5707963f * EQ_MID_R;               // ~73.8
+const float EQ_HOR_LEN = (EQ_W - 13) - EQ_CX;                 // 167
+const float EQ_LEN_TOT = EQ_VERT_LEN + EQ_ARC_LEN + EQ_HOR_LEN; // ~490
 
-enum PageId : uint8_t { PAGE_RACE = 0, PAGE_TELEM, PAGE_ENGINE, PAGE_DYNO, PAGE_SETTINGS, PAGE_SESSIONS };
-static const uint8_t NB_PAGES = 6;
+// temp <-> position sur le chemin (300 C en bas, 700 C au bout)
+// norm = clamp((T-300)/400)
 
-lv_obj_t *g_pages[5];
-uint8_t g_pageIdx = PAGE_RACE;
+// Couleur continue : vert fonce (300) -> orange (550) -> rouge vif (700)
+lv_color_t colorAtTemp(float temp)
+{
+    if (temp <= 550.0f) {
+        float r = (temp - 300.0f) / 250.0f;
+        if (r < 0) r = 0;
+        uint8_t rr = (uint8_t)(0x1F + (0xF5 - 0x1F) * r);
+        uint8_t gg = (uint8_t)(0xA0 + (0x82 - 0xA0) * r);
+        uint8_t bb = (uint8_t)(0x55 + (0x20 - 0x55) * r);
+        return lv_color_make(rr, gg, bb);
+    }
+    float r = (temp - 550.0f) / 150.0f;
+    if (r > 1) r = 1;
+    uint8_t rr = (uint8_t)(0xF5 + (0xFF - 0xF5) * r);
+    uint8_t gg = (uint8_t)(0x82 + (0x17 - 0x82) * r);
+    uint8_t bb = (uint8_t)(0x20 + (0x44 - 0x20) * r);
+    return lv_color_make(rr, gg, bb);
+}
 
-// Course
-lv_obj_t *wEgtFillV, *wEgtFillH, *wEgtFillE, *wEgtLabel, *wEgtMark, *wLapCur, *wLapBest, *wLapLast;
-lv_obj_t *wGpsBadge, *wSdBadge, *wBleBadge, *wAccLabel;
+// Dessin du canvas : 1 pixel = 1 position le long du chemin -> degrade continu
+void drawEquerre(lv_obj_t *canvas)
+{
+    for (int py = 0; py < EQ_H; py++) {
+        for (int px = 0; px < EQ_W; px++) {
+            float distAlong = -1.0f;
+            bool inBand = false;
+            if (px <= EQ_R_OUT - EQ_R_IN && py > EQ_CY) {           // branche verticale
+                inBand = (py <= EQ_H - 13) ||
+                         ((px - 13) * (px - 13) + (py - (EQ_H - 13)) * (py - (EQ_H - 13)) <= 169);
+                if (inBand) distAlong = (EQ_H - 1) - py;
+            } else if (py <= EQ_R_OUT - EQ_R_IN && px > EQ_CX) {    // branche horizontale
+                inBand = (px <= EQ_W - 14) ||
+                         ((px - (EQ_W - 14)) * (px - (EQ_W - 14)) + (py - 13) * (py - 13) <= 169);
+                if (inBand) distAlong = EQ_VERT_LEN + EQ_ARC_LEN + (px - EQ_CX);
+            } else if (px <= EQ_CX && py <= EQ_CY) {                // coude (quart de cercle)
+                float dx = px - EQ_CX, dy = py - EQ_CY;
+                float d = sqrtf(dx * dx + dy * dy);
+                if (d <= EQ_R_OUT + 0.5f && d >= EQ_R_IN - 0.5f) {
+                    float frac = atan2f(EQ_CY - py, EQ_CX - px) / 1.5707963f;
+                    distAlong = EQ_VERT_LEN + frac * EQ_ARC_LEN;
+                    inBand = true;
+                }
+            }
+            if (!inBand) continue;
+            float t = distAlong / EQ_LEN_TOT;
+            if (t < 0) t = 0;
+            if (t > 1) t = 1;
+            lv_canvas_set_px(canvas, px, py, colorAtTemp(300.0f + t * 400.0f));
+        }
+    }
+}
 
-// Telemetrie
-lv_obj_t *wGZone, *wGDot, *wBankBar, *wBankLabel, *wGLongLabel, *wGLatLabel;
+// ------------------------ Widgets (pointeurs globaux) ------------------------
+static lv_obj_t *g_tileview = nullptr;
+static lv_obj_t *g_tilePiste = nullptr;
+static lv_obj_t *g_tileGForce = nullptr;
+static lv_obj_t *g_tileDyno = nullptr;
+static lv_obj_t *g_tileSetup = nullptr;
 
-// Moteur
-lv_obj_t *wRpmBar, *wRpmLabel, *wEgtMaxLabel, *wPowerLabel, *wTorqueLabel;
+// Piste
+static lv_obj_t *wEgtVal, *wCurLap, *wBestLap, *wLastLap;
+static lv_obj_t *wGpsBadge, *wGpsSats, *wGpsAcc, *wSdBadge, *wBleBadge;
+static lv_obj_t *wEgtCursorMax;
 
-// Banc d'essai
-lv_obj_t *wDynoEgt, *wDynoEgtMax, *wDynoRpm, *wDynoP, *wDynoC, *wDynoPMax, *wDynoCMax;
-float s_dynoPMax = 0, s_dynoCMax = 0;
+// G-Force
+static lv_obj_t *wGDot, *wGLat, *wGLon, *wRpmG, *wSpdG;
 
-// Parametres
-lv_obj_t *wMassVal, *wCxsaVal, *wEtaVal, *wRadiusVal, *wLapLineLabel;
+// Banc
+static lv_obj_t *wDynoHp, *wDynoNm, *wDynoMaxHp, *wDynoMaxNm, *wDynoMaxEgt;
 
-// Sessions
-lv_obj_t *wRecBtn, *wRecBtnLabel, *wSdState, *wSessionsList;
+// Parametrage
+static lv_obj_t *wMassVal, *wScxVal, *wSetupStatus, *wRecBtn, *wRecBtnLabel;
 
-// ------------------------------ Helpers ------------------------------------
+// Maxima pics banc (RAZ possibles)
+static float s_dynoPMax = 0.0f;
+static float s_dynoCMax = 0.0f;
 
+// ------------------------------- Helpers ------------------------------------
 lv_obj_t *makeLabel(lv_obj_t *parent, const char *txt, const lv_font_t *font,
-                    lv_color_t color, lv_align_t align, lv_coord_t xo, lv_coord_t yo)
+                    lv_color_t color, int32_t x, int32_t y)
 {
     lv_obj_t *l = lv_label_create(parent);
     lv_label_set_text(l, txt);
-    lv_obj_set_style_text_font(l, font, 0);
     lv_obj_set_style_text_color(l, color, 0);
-    lv_obj_align(l, align, xo, yo);
+    if (font) lv_obj_set_style_text_font(l, font, 0);
+    lv_obj_set_pos(l, x, y);
     return l;
 }
 
-lv_obj_t *makeBadge(lv_obj_t *parent, const char *txt, lv_coord_t xo, lv_coord_t yo, lv_color_t bg)
+lv_obj_t *makeLabelAlign(lv_obj_t *parent, const char *txt, const lv_font_t *font,
+                         lv_color_t color, lv_align_t align, int32_t x, int32_t y)
 {
-    lv_obj_t *b = lv_label_create(parent);
-    lv_label_set_text(b, txt);
-    lv_obj_set_style_text_font(b, &lv_font_montserrat_14, 0);
-    lv_obj_set_style_text_color(b, C_BG, 0);
+    lv_obj_t *l = lv_label_create(parent);
+    lv_label_set_text(l, txt);
+    lv_obj_set_style_text_color(l, color, 0);
+    if (font) lv_obj_set_style_text_font(l, font, 0);
+    lv_obj_align(l, align, x, y);
+    return l;
+}
+
+lv_obj_t *makeBadgeBox(lv_obj_t *parent, int32_t w, int32_t h, int32_t x, int32_t y,
+                       lv_color_t bg)
+{
+    lv_obj_t *b = lv_obj_create(parent);
+    lv_obj_set_size(b, w, h);
+    lv_obj_set_pos(b, x, y);
     lv_obj_set_style_bg_color(b, bg, 0);
     lv_obj_set_style_bg_opa(b, LV_OPA_COVER, 0);
-    lv_obj_set_style_radius(b, 4, 0);
-    lv_obj_set_style_pad_hor(b, 8, 0);
-    lv_obj_set_style_pad_ver(b, 4, 0);
-    lv_obj_align(b, LV_ALIGN_TOP_RIGHT, xo, yo);
+    lv_obj_set_style_radius(b, 6, 0);
+    lv_obj_set_style_border_width(b, 0, 0);
+    lv_obj_set_style_shadow_width(b, 0, 0);
+    lv_obj_set_style_pad_all(b, 0, 0);
+    lv_obj_clear_flag(b, LV_OBJ_FLAG_SCROLLABLE);
     return b;
 }
 
-const char *fmtLap(uint32_t ms, char *buf, size_t len)
+lv_obj_t *makeColorBtn(lv_obj_t *parent, int32_t w, int32_t h, lv_align_t align,
+                       int32_t x, int32_t y, lv_color_t bg, const char *txt,
+                       const lv_font_t *font, lv_event_cb_t cb)
 {
-    if (ms == 0) {
-        snprintf(buf, len, "--'--,--");
-    } else {
-        uint32_t m = ms / 60000;
-        uint32_t s = (ms % 60000) / 1000;
-        uint32_t h = (ms % 1000) / 10;
-        snprintf(buf, len, "%02lu'%02lu,%02lu", (unsigned long)m, (unsigned long)s, (unsigned long)h);
-    }
-    return buf;
-}
-
-// ----------------------------- Navigation ----------------------------------
-
-void showPage(uint8_t idx);
-void dynoRazCb(lv_event_t *e)
-{
-    (void)e;
-    s_dynoPMax = 0;
-    s_dynoCMax = 0;
-}
-
-void gestureCb(lv_event_t *e)
-{
-    (void)e;
-    lv_dir_t dir = lv_indev_get_gesture_dir(lv_indev_get_act());
-    if (dir == LV_DIR_LEFT) showPage((g_pageIdx + 1) % NB_PAGES);
-    else if (dir == LV_DIR_RIGHT) showPage((g_pageIdx + NB_PAGES - 1) % NB_PAGES);
-}
-
-void makeNavDots(lv_obj_t *page, uint8_t active)
-{
-    for (int i = 0; i < NB_PAGES; i++) {
-        lv_obj_t *dot = lv_obj_create(page);
-        lv_obj_remove_style_all(dot);
-        lv_obj_set_size(dot, 8, 8);
-        lv_obj_set_style_radius(dot, LV_RADIUS_CIRCLE, 0);
-        lv_obj_set_style_bg_color(dot, i == active ? C_ACCENT : C_GRAY, 0);
-        lv_obj_set_style_bg_opa(dot, LV_OPA_COVER, 0);
-        lv_obj_align(dot, LV_ALIGN_TOP_MID, -(int)((NB_PAGES - 1) * 12) + i * 24, 14);
-    }
-}
-
-lv_obj_t *newPage(const char *title, uint8_t id)
-{
-    lv_obj_t *page = lv_obj_create(lv_scr_act());
-    lv_obj_set_size(page, LCD_WIDTH, LCD_HEIGHT);
-    lv_obj_set_style_bg_color(page, C_BG, 0);
-    lv_obj_set_style_bg_opa(page, LV_OPA_COVER, 0);
-    lv_obj_set_style_border_width(page, 0, 0);
-    lv_obj_set_style_radius(page, 0, 0);
-    lv_obj_set_style_pad_all(page, 0, 0);
-    lv_obj_clear_flag(page, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_add_event_cb(page, gestureCb, LV_EVENT_GESTURE, nullptr);
-    lv_obj_add_flag(page, LV_OBJ_FLAG_HIDDEN);
-    makeLabel(page, title, &lv_font_montserrat_14, C_GRAY, LV_ALIGN_TOP_MID, 0, 26);
-    makeNavDots(page, id);
-    g_pages[id] = page;
-    return page;
-}
-
-lv_obj_t *makeButton(lv_obj_t *parent, const char *txt, lv_align_t align,
-                     lv_coord_t xo, lv_coord_t yo, lv_event_cb_t cb)
-{
-    lv_obj_t *btn = lv_btn_create(parent);
-    lv_obj_set_size(btn, 150, 60);
-    lv_obj_align(btn, align, xo, yo);
-    lv_obj_t *l = lv_label_create(btn);
+    lv_obj_t *b = lv_btn_create(parent);
+    lv_obj_set_size(b, w, h);
+    lv_obj_align(b, align, x, y);
+    lv_obj_set_style_bg_color(b, bg, 0);
+    lv_obj_set_style_radius(b, 6, 0);
+    lv_obj_set_style_border_width(b, 0, 0);
+    lv_obj_set_style_shadow_width(b, 0, 0);
+    if (cb) lv_obj_add_event_cb(b, cb, LV_EVENT_CLICKED, nullptr);
+    lv_obj_t *l = lv_label_create(b);
     lv_label_set_text(l, txt);
+    lv_obj_set_style_text_font(l, font, 0);
     lv_obj_center(l);
-    if (cb) lv_obj_add_event_cb(btn, cb, LV_EVENT_CLICKED, nullptr);
-    return btn;
+    return b;
 }
 
-// --------------------------- Page PARAMETRES -------------------------------
-
-struct Stepper {
-    float *field;
-    float step;
-};
-
-VehicleSettings g_edit;       // copie de travail de la page Parametres
-
-void refreshSteppers()
+// Chrono au format de l'utilisateur : 00"26,98
+void fmtLap(uint32_t ms, char *buf, size_t len)
 {
-    char buf[24];
-    snprintf(buf, sizeof(buf), "%.0f kg", g_edit.mass_kg);
-    lv_label_set_text(wMassVal, buf);
-    snprintf(buf, sizeof(buf), "%.2f m2", g_edit.cxsa);
-    lv_label_set_text(wCxsaVal, buf);
-    snprintf(buf, sizeof(buf), "%.2f", g_edit.eta);
-    lv_label_set_text(wEtaVal, buf);
-    snprintf(buf, sizeof(buf), "%.0f m", g_edit.lap_radius_m);
-    lv_label_set_text(wRadiusVal, buf);
-    if (g_edit.lap_lat != 0.0 || g_edit.lap_lon != 0.0) {
-        lv_label_set_text(wLapLineLabel, "Ligne : definie");
+    if (ms == 0) { snprintf(buf, len, "--\"--,--"); return; }
+    uint32_t m = ms / 60000;
+    uint32_t s = (ms % 60000) / 1000;
+    uint32_t cs = (ms % 1000) / 10;
+    snprintf(buf, len, "%02lu\"%02lu,%02lu", (unsigned long)m,
+             (unsigned long)s, (unsigned long)cs);
+}
+
+// -------------------------- Page 1 : PISTE ----------------------------------
+void buildTrackPage(lv_obj_t *parent)
+{
+    // A. Barre en equerre arrondie, degrade continu (canvas, dessin 1 fois)
+    static lv_color_t *eqBuf = nullptr;
+    if (!eqBuf) {
+        size_t bytes = LV_CANVAS_BUF_SIZE_TRUE_COLOR_ALPHA(EQ_W, EQ_H);
+        eqBuf = (lv_color_t *)heap_caps_malloc(bytes, MALLOC_CAP_SPIRAM);
+        if (!eqBuf) eqBuf = (lv_color_t *)heap_caps_malloc(bytes, MALLOC_CAP_8BIT | MALLOC_CAP_INTERNAL);
+    }
+    lv_obj_t *canvas = lv_canvas_create(parent);
+    lv_canvas_set_buffer(canvas, eqBuf, EQ_W, EQ_H, LV_IMG_CF_TRUE_COLOR_ALPHA);
+    lv_canvas_fill_bg(canvas, CL_BLACK, LV_OPA_TRANSP);
+    lv_obj_set_pos(canvas, 8, 8);
+    drawEquerre(canvas);
+
+    // Label EGT (dans le creux du coude)
+    makeLabel(parent, "EGT", &lv_font_montserrat_24, CL_WHITE, 40, 40);
+
+    // Curseur noir : T deg max ENREGISTREE durant la session (300..700 C)
+    wEgtCursorMax = lv_obj_create(parent);
+    lv_obj_remove_style_all(wEgtCursorMax);
+    lv_obj_set_size(wEgtCursorMax, 30, 5);
+    lv_obj_set_style_bg_color(wEgtCursorMax, CL_BLACK, 0);
+    lv_obj_set_style_bg_opa(wEgtCursorMax, LV_OPA_COVER, 0);
+    lv_obj_set_style_radius(wEgtCursorMax, 2, 0);
+    lv_obj_set_pos(wEgtCursorMax, 6, 316);
+
+    // B. Badges etat haut droite
+    wGpsBadge = makeBadgeBox(parent, 110, 42, 265, 10, CL_YELLOW);
+    wGpsSats = lv_label_create(wGpsBadge);
+    lv_label_set_text(wGpsSats, "0Gps");
+    lv_obj_set_style_text_color(wGpsSats, CL_BLACK, 0);
+    lv_obj_set_style_text_font(wGpsSats, &lv_font_montserrat_28, 0);
+    lv_obj_set_style_pad_all(wGpsBadge, 0, 0);
+    lv_obj_center(wGpsSats);
+
+    wGpsAcc = makeLabel(parent, "~--m", &lv_font_montserrat_24, CL_WHITE, 272, 58);
+
+    wSdBadge = makeBadgeBox(parent, 85, 42, 385, 10, CL_BADGED);
+    lv_obj_t *lblSd = lv_label_create(wSdBadge);
+    lv_label_set_text(lblSd, "SD");
+    lv_obj_set_style_text_color(lblSd, CL_BLACK, 0);
+    lv_obj_set_style_text_font(lblSd, &lv_font_montserrat_28, 0);
+    lv_obj_center(lblSd);
+
+    wBleBadge = makeBadgeBox(parent, 85, 36, 385, 58, CL_BADGED);
+    lv_obj_t *lblBle = lv_label_create(wBleBadge);
+    lv_label_set_text(lblBle, "BLE");
+    lv_obj_set_style_text_color(lblBle, CL_BLACK, 0);
+    lv_obj_set_style_text_font(lblBle, &lv_font_montserrat_22, 0);
+    lv_obj_center(lblBle);
+
+    // C. Valeur EGT geante (alarme = couleur du chiffre uniquement)
+    wEgtVal = lv_label_create(parent);
+    lv_label_set_text(wEgtVal, "---\xC2\xB0" "c");
+    lv_obj_set_style_text_color(wEgtVal, CL_GREEN, 0);
+    lv_obj_set_style_text_font(wEgtVal, &lv_font_montserrat_48, 0);
+    lv_obj_set_style_transform_zoom(wEgtVal, 480, 0);   // 48 px -> ~90 px
+    lv_obj_set_style_transform_pivot_x(wEgtVal, 75, 0);
+    lv_obj_set_style_transform_pivot_y(wEgtVal, 28, 0);
+    lv_obj_align(wEgtVal, LV_ALIGN_CENTER, 15, -35);
+
+    // D. Chronos empiles centre
+    wCurLap = makeLabelAlign(parent, "00\"00,00", &lv_font_montserrat_48, CL_WHITE,
+                             LV_ALIGN_CENTER, 0, 75);
+    wBestLap = makeLabelAlign(parent, "BestLap: --\"--,--", &lv_font_montserrat_32, CL_WHITE,
+                              LV_ALIGN_CENTER, 0, 140);
+    wLastLap = makeLabelAlign(parent, "LastLap: --\"--,--", &lv_font_montserrat_32, CL_WHITE,
+                              LV_ALIGN_CENTER, 0, 185);
+}
+
+void updateEgtCursor(float egtMax)
+{
+    float ratio = (egtMax - 300.0f) / 400.0f;   // plage 300..700 C
+    if (ratio < 0) ratio = 0;
+    if (ratio > 1) ratio = 1;
+    float dist = ratio * EQ_LEN_TOT;
+
+    if (dist <= EQ_VERT_LEN) {
+        // Branche verticale : curseur horizontal 30x5
+        int yCanvas = (int)((EQ_H - 1) - dist);
+        lv_obj_set_size(wEgtCursorMax, 30, 5);
+        lv_obj_set_pos(wEgtCursorMax, 6, 8 + yCanvas - 2);
+    } else if (dist <= EQ_VERT_LEN + EQ_ARC_LEN) {
+        // Coude arrondi : petit point noir suivant l'arc
+        float frac = (dist - EQ_VERT_LEN) / EQ_ARC_LEN;
+        float a = frac * 1.5707963f;
+        int cx = 8 + EQ_CX + (int)(-EQ_MID_R * cosf(a));
+        int cy = 8 + EQ_CY + (int)(-EQ_MID_R * sinf(a));
+        lv_obj_set_size(wEgtCursorMax, 12, 12);
+        lv_obj_set_style_radius(wEgtCursorMax, LV_RADIUS_CIRCLE, 0);
+        lv_obj_set_pos(wEgtCursorMax, cx - 6, cy - 6);
     } else {
-        lv_label_set_text(wLapLineLabel, "Ligne : non definie");
+        // Branche horizontale : curseur vertical 5x30
+        int x = 8 + EQ_CX + (int)(dist - EQ_VERT_LEN - EQ_ARC_LEN);
+        lv_obj_set_size(wEgtCursorMax, 5, 30);
+        lv_obj_set_pos(wEgtCursorMax, x - 2, 8 + 13 - 15);
     }
+    lv_obj_invalidate(wEgtCursorMax);
 }
 
-void stepperApply()
+void updateTrackPage(const TelemetryFrame &f)
 {
-    settings_update(g_edit);
-}
+    // EGT + coloration par seuils (alarme sur le chiffre uniquement)
+    if (f.egt_c > 0) {
+        char b[16];
+        snprintf(b, sizeof(b), "%.0f\xC2\xB0" "c", f.egt_c);
+        lv_label_set_text(wEgtVal, b);
+    } else {
+        lv_label_set_text(wEgtVal, "---\xC2\xB0" "c");
+    }
+    lv_color_t egtCol = CL_GREEN;
+    if (f.egt_c >= EGT_RED_C) egtCol = CL_RED;
+    else if (f.egt_c >= EGT_ORANGE_C) egtCol = CL_ORANGE;
+    lv_obj_set_style_text_color(wEgtVal, egtCol, 0);
 
-void stepperMinus(lv_event_t *e)
-{
-    Stepper *st = (Stepper *)lv_event_get_user_data(e);
-    *st->field -= st->step;
-    if (*st->field < 0) *st->field = 0;
-    refreshSteppers();
-    stepperApply();
-}
+    if (f.egt_max_c > 0) updateEgtCursor(f.egt_max_c);
 
-void stepperPlus(lv_event_t *e)
-{
-    Stepper *st = (Stepper *)lv_event_get_user_data(e);
-    *st->field += st->step;
-    refreshSteppers();
-    stepperApply();
-}
-
-lv_obj_t *makeStepperRow(lv_obj_t *parent, const char *title, float *field,
-                         float step, lv_coord_t y)
-{
-    makeLabel(parent, title, &lv_font_montserrat_20, C_WHITE, LV_ALIGN_TOP_LEFT, 24, y);
-
-    lv_obj_t *minus = lv_btn_create(parent);
-    lv_obj_set_size(minus, 54, 44);
-    lv_obj_align(minus, LV_ALIGN_TOP_RIGHT, -172, y - 4);
-    lv_obj_t *ml = lv_label_create(minus);
-    lv_label_set_text(ml, "-");
-    lv_obj_center(ml);
-
-    lv_obj_t *val = lv_label_create(parent);
-    lv_obj_set_style_text_font(val, &lv_font_montserrat_20, 0);
-    lv_obj_set_style_text_color(val, C_ACCENT, 0);
-    lv_obj_align(val, LV_ALIGN_TOP_RIGHT, -104, y + 6);
-
-    lv_obj_t *plus = lv_btn_create(parent);
-    lv_obj_set_size(plus, 54, 44);
-    lv_obj_align(plus, LV_ALIGN_TOP_RIGHT, -24, y - 4);
-    lv_obj_t *pl = lv_label_create(plus);
-    lv_label_set_text(pl, "+");
-    lv_obj_center(pl);
-
-    Stepper *st = new Stepper{field, step};
-    lv_obj_add_event_cb(minus, stepperMinus, LV_EVENT_CLICKED, st);
-    lv_obj_add_event_cb(plus, stepperPlus, LV_EVENT_CLICKED, st);
-    return val;
-}
-
-void lapHereCb(lv_event_t *e)
-{
-    (void)e;
+    // GPS compact : badge sats + precision (pad < 0.5u => ~%.1fm, val by user)
     GpsFix g = gps_get();
-    if (!g.valid) {
-        lv_label_set_text(wLapLineLabel, "Ligne : pas de GPS !");
-        return;
-    }
-    settings_lapLineHere(g);
-    g_edit = settings_get();
-    refreshSteppers();
+    lv_label_set_text_fmt(wGpsSats, "%uGps", (unsigned)g.sats);
+    lv_label_set_text_fmt(wGpsAcc, "~%.1fm", g.hdop * 0.5f);
+    lv_color_t gpsBg;
+    if (g.sats >= 8 && g.hdop < 1.5f) gpsBg = CL_GREEN;
+    else if (g.sats >= 5) gpsBg = CL_YELLOW;
+    else gpsBg = CL_BADGED;
+    lv_obj_set_style_bg_color(wGpsBadge, gpsBg, 0);
+
+    // SD / BLE : vert ok, rouge pas ok
+    lv_obj_set_style_bg_color(wSdBadge, sd_ready() ? CL_GREEN : CL_BADGED, 0);
+    lv_obj_set_style_bg_color(wBleBadge, ble_connected() ? CL_GREEN : CL_BADGED, 0);
+
+    // Chronos
+    ChronoState c = chrono_get();
+    char b1[24], b2[24], b3[24];
+    fmtLap(c.current_lap_ms, b1, sizeof(b1));
+    lv_label_set_text(wCurLap, b1);
+    fmtLap(c.best_lap_ms, b2, sizeof(b2));
+    lv_label_set_text_fmt(wBestLap, "BestLap: %s", b2);
+    fmtLap(c.last_lap_ms, b3, sizeof(b3));
+    lv_label_set_text_fmt(wLastLap, "LastLap: %s", b3);
 }
 
-void calibCb(lv_event_t *e)
+// -------------------------- Page 2 : G-FORCE --------------------------------
+void buildGForcePage(lv_obj_t *parent)
 {
-    (void)e;
-    acq_calibrateFlat();
-}
+    makeLabelAlign(parent, "G-FORCE & DYNAMIQUE", &lv_font_montserrat_24, CL_ORANGE,
+                   LV_ALIGN_TOP_MID, 0, 15);
 
-void buildSettingsPage()
-{
-    lv_obj_t *p = newPage("PARAMETRES", PAGE_SETTINGS);
-    g_edit = settings_get();
+    lv_obj_t *outer = lv_obj_create(parent);
+    lv_obj_set_size(outer, 260, 260);
+    lv_obj_align(outer, LV_ALIGN_CENTER, 0, -20);
+    lv_obj_set_style_radius(outer, LV_RADIUS_CIRCLE, 0);
+    lv_obj_set_style_bg_color(outer, lv_color_hex(0x111111), 0);
+    lv_obj_set_style_border_color(outer, lv_color_hex(0x555555), 0);
+    lv_obj_set_style_border_width(outer, 2, 0);
+    lv_obj_clear_flag(outer, LV_OBJ_FLAG_SCROLLABLE);
 
-    wMassVal = makeStepperRow(p, "MASSE (pilote + velo)", &g_edit.mass_kg, 5.0f, 64);
-    wCxsaVal = makeStepperRow(p, "Cx*S (m2)", &g_edit.cxsa, 0.02f, 128);
-    wEtaVal = makeStepperRow(p, "Renlement transmission", &g_edit.eta, 0.02f, 192);
-    wRadiusVal = makeStepperRow(p, "Rayon ligne (m)", &g_edit.lap_radius_m, 5.0f, 256);
+    lv_obj_t *inner = lv_obj_create(outer);
+    lv_obj_set_size(inner, 130, 130);
+    lv_obj_center(inner);
+    lv_obj_set_style_radius(inner, LV_RADIUS_CIRCLE, 0);
+    lv_obj_set_style_bg_opa(inner, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_color(inner, lv_color_hex(0x444444), 0);
+    lv_obj_set_style_border_width(inner, 1, 0);
+    lv_obj_clear_flag(inner, LV_OBJ_FLAG_SCROLLABLE);
 
-    makeButton(p, "LIGNE ICI", LV_ALIGN_BOTTOM_LEFT, 20, -180, lapHereCb);
-    makeButton(p, "CALIBRER", LV_ALIGN_BOTTOM_LEFT, 20, -60, calibCb);
-
-    wLapLineLabel = makeLabel(p, "Ligne : non definie", &lv_font_montserrat_14, C_DIM,
-                              LV_ALIGN_BOTTOM_LEFT, 22, -120);
-    refreshSteppers();
-}
-
-// ------------------------------ Page COURSE --------------------------------
-
-void egtZoneColor(float egt, lv_color_t &out)
-{
-    if (egt >= 600) out = C_RED;
-    else if (egt >= 500) out = C_ORANGE;
-    else out = C_GREEN;
-}
-
-void buildRacePage()
-{
-    // Page sans titre : le bargraph coude occupe les bords haut et gauche
-    lv_obj_t *p = lv_obj_create(lv_scr_act());
-    lv_obj_set_size(p, LCD_WIDTH, LCD_HEIGHT);
-    lv_obj_set_style_bg_color(p, C_BG, 0);
-    lv_obj_set_style_bg_opa(p, LV_OPA_COVER, 0);
-    lv_obj_set_style_border_width(p, 0, 0);
-    lv_obj_set_style_radius(p, 0, 0);
-    lv_obj_set_style_pad_all(p, 0, 0);
-    lv_obj_clear_flag(p, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_add_event_cb(p, gestureCb, LV_EVENT_GESTURE, nullptr);
-    lv_obj_add_flag(p, LV_OBJ_FLAG_HIDDEN);
-    g_pages[PAGE_RACE] = p;
-
-    // Points de navigation en bas (le haut est pris par le bargraph)
-    for (int i = 0; i < NB_PAGES; i++) {
-        lv_obj_t *dot = lv_obj_create(p);
-        lv_obj_remove_style_all(dot);
-        lv_obj_set_size(dot, 8, 8);
-        lv_obj_set_style_radius(dot, LV_RADIUS_CIRCLE, 0);
-        lv_obj_set_style_bg_color(dot, i == PAGE_RACE ? C_ACCENT : C_GRAY, 0);
-        lv_obj_set_style_bg_opa(dot, LV_OPA_COVER, 0);
-        lv_obj_align(dot, LV_ALIGN_BOTTOM_MID, -(int)((NB_PAGES - 1) * 12) + i * 24, -10);
-    }
-
-    // Fond : les 3 zones EGT sombres projete-sur le tracé coude arrondi
-    const int GRN_H = EGT_GRN_END - EGT_LEN_V - EGT_LEN_ELB;   // part horizontale verte
-    const int ORA_H = EGT_ORA_END - EGT_GRN_END;
-    lv_obj_t *seg;
-    seg = lv_obj_create(p);          // vert : branche verticale
-    lv_obj_remove_style_all(seg);
-    lv_obj_set_pos(seg, 0, EGT_CY);
-    lv_obj_set_size(seg, EGT_BAR, EGT_LEN_V);
-    lv_obj_set_style_bg_color(seg, lv_color_hex(0x14532D), 0);
-    lv_obj_set_style_bg_opa(seg, LV_OPA_COVER, 0);
-
-    lv_obj_t *elbowBg = lv_arc_create(p);   // vert : coude arrondi (quart de cercle)
-    lv_obj_set_size(elbowBg, 2 * EGT_R_OUT, 2 * EGT_R_OUT);
-    lv_obj_align(elbowBg, LV_ALIGN_CENTER, EGT_CX - LCD_WIDTH / 2, EGT_CY - LCD_HEIGHT / 2);
-    lv_arc_set_bg_angles(elbowBg, 180, 270);
-    lv_arc_set_rotation(elbowBg, 0);
-    lv_arc_set_range(elbowBg, 0, 100);
-    lv_arc_set_value(elbowBg, 0);
-    lv_obj_remove_style(elbowBg, nullptr, LV_PART_INDICATOR);
-    lv_obj_remove_style(elbowBg, nullptr, LV_PART_KNOB);
-    lv_obj_clear_flag(elbowBg, LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_set_style_arc_width(elbowBg, EGT_BAR, LV_PART_MAIN);
-    lv_obj_set_style_arc_color(elbowBg, lv_color_hex(0x14532D), LV_PART_MAIN);
-    lv_obj_set_style_bg_opa(elbowBg, LV_OPA_TRANSP, LV_PART_MAIN);
-
-    seg = lv_obj_create(p);          // vert : debut de l'horizontale
-    lv_obj_remove_style_all(seg);
-    lv_obj_set_pos(seg, EGT_CX, 0);
-    lv_obj_set_size(seg, GRN_H, EGT_BAR);
-    lv_obj_set_style_bg_color(seg, lv_color_hex(0x14532D), 0);
-    lv_obj_set_style_bg_opa(seg, LV_OPA_COVER, 0);
-    // orange
-    seg = lv_obj_create(p);
-    lv_obj_remove_style_all(seg);
-    lv_obj_set_pos(seg, EGT_CX + GRN_H, 0);
-    lv_obj_set_size(seg, ORA_H, EGT_BAR);
-    lv_obj_set_style_bg_color(seg, lv_color_hex(0x78350F), 0);
-    lv_obj_set_style_bg_opa(seg, LV_OPA_COVER, 0);
-    // rouge
-    seg = lv_obj_create(p);
-    lv_obj_remove_style_all(seg);
-    lv_obj_set_pos(seg, EGT_CX + GRN_H + ORA_H, 0);
-    lv_obj_set_size(seg, EGT_H_END - (EGT_CX + GRN_H + ORA_H), EGT_BAR);
-    lv_obj_set_style_bg_color(seg, lv_color_hex(0x7F1D1D), 0);
-    lv_obj_set_style_bg_opa(seg, LV_OPA_COVER, 0);
-
-    // Remplissage : verticale, arc du coude, horizontale
-    wEgtFillV = lv_obj_create(p);
-    lv_obj_remove_style_all(wEgtFillV);
-    lv_obj_set_pos(wEgtFillV, 0, EGT_V_BOT);
-    lv_obj_set_size(wEgtFillV, EGT_BAR, 0);
-    lv_obj_set_style_bg_color(wEgtFillV, C_GREEN, 0);
-    lv_obj_set_style_bg_opa(wEgtFillV, LV_OPA_COVER, 0);
-
-    wEgtFillH = lv_obj_create(p);
-    lv_obj_remove_style_all(wEgtFillH);
-    lv_obj_set_pos(wEgtFillH, EGT_CX, 0);
-    lv_obj_set_size(wEgtFillH, 0, EGT_BAR);
-    lv_obj_set_style_bg_color(wEgtFillH, C_GREEN, 0);
-    lv_obj_set_style_bg_opa(wEgtFillH, LV_OPA_COVER, 0);
-
-    wEgtFillE = lv_arc_create(p);    // arc de remplissage du coude
-    lv_obj_set_size(wEgtFillE, 2 * EGT_R_OUT, 2 * EGT_R_OUT);
-    lv_obj_align(wEgtFillE, LV_ALIGN_CENTER, EGT_CX - LCD_WIDTH / 2, EGT_CY - LCD_HEIGHT / 2);
-    lv_arc_set_bg_angles(wEgtFillE, 180, 270);
-    lv_arc_set_rotation(wEgtFillE, 0);
-    lv_arc_set_range(wEgtFillE, 0, 100);
-    lv_arc_set_value(wEgtFillE, 0);
-    lv_obj_remove_style(wEgtFillE, nullptr, LV_PART_KNOB);
-    lv_obj_clear_flag(wEgtFillE, LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_set_style_arc_width(wEgtFillE, EGT_BAR, LV_PART_MAIN);
-    lv_obj_set_style_arc_color(wEgtFillE, lv_color_hex(0x14532D), LV_PART_MAIN);
-    lv_obj_set_style_arc_width(wEgtFillE, EGT_BAR, LV_PART_INDICATOR);
-    lv_obj_set_style_arc_color(wEgtFillE, C_GREEN, LV_PART_INDICATOR);
-    lv_obj_set_style_bg_opa(wEgtFillE, LV_OPA_TRANSP, 0);
-
-    // Curseur : maximum EGT enregistre durant la session (suivit le tracé)
-    wEgtMark = lv_obj_create(p);
-    lv_obj_remove_style_all(wEgtMark);
-    lv_obj_set_size(wEgtMark, EGT_BAR + 12, 4);
-    lv_obj_set_pos(wEgtMark, -6, EGT_V_BOT);
-    lv_obj_set_style_bg_color(wEgtMark, C_WHITE, 0);
-    lv_obj_set_style_bg_opa(wEgtMark, LV_OPA_COVER, 0);
-    lv_obj_set_style_radius(wEgtMark, 2, 0);
-
-    // EGT en tres gros, en haut a gauche a l'interieur du coude (zoom 1.8x)
-    wEgtLabel = makeLabel(p, "---", &lv_font_montserrat_48, C_GREEN,
-                          LV_ALIGN_TOP_LEFT, 54, 76);
-    lv_obj_set_style_transform_zoom(wEgtLabel, 460, 0);
-    lv_obj_set_style_transform_pivot_x(wEgtLabel, 75, 0);
-    lv_obj_set_style_transform_pivot_y(wEgtLabel, 28, 0);
-
-    // Temps au tour courant, grand, au centre
-    wLapCur = makeLabel(p, "--'--,--", &lv_font_montserrat_30, C_WHITE,
-                        LV_ALIGN_CENTER, 0, 30);
-    lv_obj_set_style_transform_zoom(wLapCur, 340, 0);
-    lv_obj_set_style_transform_pivot_x(wLapCur, 70, 17);
-    lv_obj_set_style_transform_pivot_y(wLapCur, 17, 0);
-
-    // Best / Last sur la meme ligne, en bas
-    wLapBest = makeLabel(p, "BEST   --'--,--", &lv_font_montserrat_22, C_WHITE,
-                         LV_ALIGN_BOTTOM_LEFT, 28, -34);
-    wLapLast = makeLabel(p, "LAST   --'--,--", &lv_font_montserrat_22, C_WHITE,
-                         LV_ALIGN_BOTTOM_RIGHT, -28, -34);
-
-    // Badges a droite sous la bande horizontale : GPS, SD, BLE + precision
-    wGpsBadge = makeBadge(p, "GPS --", -128, 58, C_RED);
-    wSdBadge = makeBadge(p, "SD --", -64, 58, C_RED);
-    wBleBadge = makeBadge(p, "BLE", -16, 58, C_RED);
-    wAccLabel = makeLabel(p, "-- m", &lv_font_montserrat_14, C_DIM,
-                          LV_ALIGN_TOP_RIGHT, -215, 64);
-}
-
-// ---------------------------- Page TELEMETRIE ------------------------------
-
-void buildTelemPage()
-{
-    lv_obj_t *p = newPage("TELEMETRIE", PAGE_TELEM);
-
-    // Cercle G-Force (lat en abscisse, long en ordonnee : haut = acceleration)
-    wGZone = lv_obj_create(p);
-    lv_obj_set_size(wGZone, 300, 300);
-    lv_obj_align(wGZone, LV_ALIGN_CENTER, 0, -46);
-    lv_obj_set_style_radius(wGZone, LV_RADIUS_CIRCLE, 0);
-    lv_obj_set_style_border_color(wGZone, lv_color_hex(0x374151), 0);
-    lv_obj_set_style_border_width(wGZone, 3, 0);
-    lv_obj_set_style_bg_color(wGZone, lv_color_hex(0x0B0F19), 0);
-    lv_obj_set_style_bg_opa(wGZone, LV_OPA_COVER, 0);
-    lv_obj_clear_flag(wGZone, LV_OBJ_FLAG_SCROLLABLE);
-
-    makeLabel(wGZone, "LAT", &lv_font_montserrat_14, C_GRAY, LV_ALIGN_TOP_MID, 0, 2);
-    makeLabel(wGZone, "LONG", &lv_font_montserrat_14, C_GRAY, LV_ALIGN_RIGHT_MID, -10, 0);
-
-    wGDot = lv_obj_create(wGZone);
-    lv_obj_remove_style_all(wGDot);
-    lv_obj_set_size(wGDot, 22, 22);
+    wGDot = lv_obj_create(outer);
+    lv_obj_set_size(wGDot, 24, 24);
     lv_obj_set_style_radius(wGDot, LV_RADIUS_CIRCLE, 0);
-    lv_obj_set_style_bg_color(wGDot, C_ACCENT, 0);
+    lv_obj_set_style_bg_color(wGDot, CL_GREEN, 0);
     lv_obj_set_style_bg_opa(wGDot, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_width(wGDot, 0, 0);
+    lv_obj_set_style_shadow_width(wGDot, 0, 0);
+    lv_obj_clear_flag(wGDot, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_center(wGDot);
 
-    wGLatLabel = makeLabel(p, "LAT  0.00 g", &lv_font_montserrat_20, C_WHITE,
-                           LV_ALIGN_BOTTOM_LEFT, 20, -64);
-    wGLongLabel = makeLabel(p, "LONG 0.00 g", &lv_font_montserrat_20, C_WHITE,
-                            LV_ALIGN_BOTTOM_LEFT, 20, -32);
-
-    // Inclinaison : barre horizontale -60..+60 deg
-    wBankBar = lv_bar_create(p);
-    lv_obj_set_size(wBankBar, 300, 16);
-    lv_obj_align(wBankBar, LV_ALIGN_BOTTOM_MID, 0, -96);
-    lv_bar_set_range(wBankBar, -60, 60);
-    lv_bar_set_value(wBankBar, 0, LV_ANIM_OFF);
-    lv_obj_set_style_bg_color(wBankBar, lv_color_hex(0x1F2937), LV_PART_MAIN);
-    lv_obj_set_style_bg_color(wBankBar, C_ORANGE, LV_PART_INDICATOR);
-
-    wBankLabel = makeLabel(p, "INCLINAISON  0 deg", &lv_font_montserrat_20, C_WHITE,
-                           LV_ALIGN_BOTTOM_MID, 0, -124);
+    wGLat = makeLabel(parent, "Lat: 0.00 G", &lv_font_montserrat_26, CL_WHITE, 30, 360);
+    wGLon = makeLabel(parent, "Lon: 0.00 G", &lv_font_montserrat_26, CL_WHITE, 260, 360);
+    wRpmG = makeLabel(parent, "0 RPM", &lv_font_montserrat_28, CL_ORANGE, 30, 415);
+    wSpdG = makeLabel(parent, "0 km/h", &lv_font_montserrat_28, CL_CYAN, 280, 415);
 }
 
-// ------------------------------ Page MOTEUR --------------------------------
-
-void buildEnginePage()
+void updateGForcePage(const TelemetryFrame &f)
 {
-    lv_obj_t *p = newPage("MOTEUR", PAGE_ENGINE);
-
-    makeLabel(p, "REGIME (tr/min)", &lv_font_montserrat_14, C_DIM,
-              LV_ALIGN_TOP_LEFT, 26, 56);
-    wRpmLabel = makeLabel(p, "0", &lv_font_montserrat_48, C_WHITE,
-                          LV_ALIGN_TOP_LEFT, 26, 78);
-
-    wRpmBar = lv_bar_create(p);
-    lv_obj_set_size(wRpmBar, 400, 18);
-    lv_obj_align(wRpmBar, LV_ALIGN_TOP_MID, 0, 142);
-    lv_bar_set_range(wRpmBar, 0, RPM_MAX_SPEED);
-    lv_bar_set_value(wRpmBar, 0, LV_ANIM_OFF);
-    lv_obj_set_style_bg_color(wRpmBar, lv_color_hex(0x1F2937), LV_PART_MAIN);
-    lv_obj_set_style_bg_color(wRpmBar, C_ACCENT, LV_PART_INDICATOR);
-
-    makeLabel(p, "EGT MAX", &lv_font_montserrat_14, C_DIM,
-              LV_ALIGN_BOTTOM_LEFT, 26, -216);
-    wEgtMaxLabel = makeLabel(p, "--- C", &lv_font_montserrat_26, C_ORANGE,
-                             LV_ALIGN_BOTTOM_LEFT, 26, -186);
-
-    makeLabel(p, "PUISSANCE", &lv_font_montserrat_14, C_DIM,
-              LV_ALIGN_BOTTOM_LEFT, 26, -136);
-    wPowerLabel = makeLabel(p, "0.0 kW", &lv_font_montserrat_26, C_GREEN,
-                            LV_ALIGN_BOTTOM_LEFT, 26, -106);
-
-    makeLabel(p, "COUPLE", &lv_font_montserrat_14, C_DIM,
-              LV_ALIGN_BOTTOM_LEFT, 250, -136);
-    wTorqueLabel = makeLabel(p, "0.0 Nm", &lv_font_montserrat_26, C_GREEN,
-                             LV_ALIGN_BOTTOM_LEFT, 250, -106);
+    int dotX = (int)(f.g_lat * 80.0f);
+    int dotY = (int)(-f.g_long * 80.0f);
+    if (dotX < -110) dotX = -110;
+    if (dotX > 110) dotX = 110;
+    if (dotY < -110) dotY = -110;
+    if (dotY > 110) dotY = 110;
+    lv_obj_align(wGDot, LV_ALIGN_CENTER, dotX, dotY);
+    lv_label_set_text_fmt(wGLat, "Lat: %.2f G", f.g_lat);
+    lv_label_set_text_fmt(wGLon, "Lon: %.2f G", f.g_long);
+    lv_label_set_text_fmt(wRpmG, "%u RPM", f.rpm);
+    lv_label_set_text_fmt(wSpdG, "%.0f km/h", f.speed_kmh);
 }
 
-// ----------------------------- Page BANC D'ESSAI ----------------------------
-
-void buildDynoPage()
+// -------------------------- Page 3 : BANC D'ESSAI ---------------------------
+void updateDynoLabels()
 {
-    lv_obj_t *p = newPage("BANC", PAGE_DYNO);
-
-    makeLabel(p, "EGT", &lv_font_montserrat_16, C_DIM, LV_ALIGN_TOP_LEFT, 40, 66);
-    wDynoEgt = makeLabel(p, "---", &lv_font_montserrat_48, C_GREEN,
-                         LV_ALIGN_TOP_LEFT, 40, 90);
-    wDynoEgtMax = makeLabel(p, "EGT MAX   ---", &lv_font_montserrat_20, C_ORANGE,
-                            LV_ALIGN_TOP_LEFT, 40, 152);
-
-    makeLabel(p, "REGIME", &lv_font_montserrat_16, C_DIM, LV_ALIGN_TOP_LEFT, 260, 66);
-    wDynoRpm = makeLabel(p, "0", &lv_font_montserrat_48, C_WHITE,
-                         LV_ALIGN_TOP_LEFT, 260, 90);
-    makeLabel(p, "tr/min", &lv_font_montserrat_14, C_DIM, LV_ALIGN_TOP_LEFT, 264, 144);
-
-    makeLabel(p, "PUISSANCE", &lv_font_montserrat_16, C_DIM, LV_ALIGN_TOP_LEFT, 40, 216);
-    wDynoP = makeLabel(p, "-- kW", &lv_font_montserrat_36, C_WHITE,
-                       LV_ALIGN_TOP_LEFT, 40, 240);
-    wDynoPMax = makeLabel(p, "P MAX   -- kW", &lv_font_montserrat_20, C_ACCENT,
-                          LV_ALIGN_TOP_LEFT, 40, 288);
-
-    makeLabel(p, "COUPLE", &lv_font_montserrat_16, C_DIM, LV_ALIGN_TOP_LEFT, 40, 344);
-    wDynoC = makeLabel(p, "-- Nm", &lv_font_montserrat_36, C_WHITE,
-                       LV_ALIGN_TOP_LEFT, 40, 368);
-    wDynoCMax = makeLabel(p, "C MAX   -- Nm", &lv_font_montserrat_20, C_ACCENT,
-                          LV_ALIGN_TOP_LEFT, 40, 416);
-
-    makeButton(p, "RAZ MAX", LV_ALIGN_BOTTOM_RIGHT, -20, -20, dynoRazCb);
+    lv_label_set_text_fmt(wDynoMaxHp, "P. MAX  : %.1f ch", s_dynoPMax);
+    lv_label_set_text_fmt(wDynoMaxNm, "C. MAX  : %.1f Nm", s_dynoCMax);
 }
 
-// ----------------------------- Page SESSIONS -------------------------------
-
-void recBtnCb(lv_event_t *e)
+void razPicsCb(lv_event_t *)
 {
-    (void)e;
-    TelemetryFrame f = telemetry_get();
-    cmds_requestRecord(!f.recording);
+    s_dynoPMax = 0.0f;
+    s_dynoCMax = 0.0f;
+    acq_resetMaxima();
+    updateDynoLabels();
+    lv_label_set_text_fmt(wDynoMaxEgt, "EGT MAX : --- \xC2\xB0" "c");
 }
 
-void refreshSessionList()
+void buildDynoPage(lv_obj_t *parent)
 {
-    if (!wSessionsList) return;
-    lv_obj_clean(wSessionsList);
-    auto files = sd_listSessions();
-    if (files.empty()) {
-        lv_list_add_text(wSessionsList, "Aucune session");
-    }
-    for (auto &f : files) {
-        lv_list_add_text(wSessionsList, f.c_str());
-    }
-}
+    makeLabelAlign(parent, "MODE BANC D'ESSAI", &lv_font_montserrat_26, CL_GREEN,
+                   LV_ALIGN_TOP_MID, 0, 15);
 
-void refreshBtnCb(lv_event_t *e)
-{
-    (void)e;
-    refreshSessionList();
-}
+    wDynoHp = makeLabel(parent, "0.0 ch", &lv_font_montserrat_48, CL_WHITE, 35, 75);
+    wDynoNm = makeLabel(parent, "0.0 Nm", &lv_font_montserrat_48, CL_CYAN, 250, 75);
 
-void buildSessionsPage()
-{
-    lv_obj_t *p = newPage("SESSIONS", PAGE_SESSIONS);
+    lv_obj_t *boxMax = lv_obj_create(parent);
+    lv_obj_set_size(boxMax, 420, 200);
+    lv_obj_align(boxMax, LV_ALIGN_CENTER, 0, 30);
+    lv_obj_set_style_bg_color(boxMax, lv_color_hex(0x141414), 0);
+    lv_obj_set_style_border_color(boxMax, CL_ORANGE, 0);
+    lv_obj_set_style_border_width(boxMax, 2, 0);
+    lv_obj_clear_flag(boxMax, LV_OBJ_FLAG_SCROLLABLE);
 
-    wRecBtn = makeButton(p, "ENREGISTRER", LV_ALIGN_TOP_MID, 0, 60, recBtnCb);
-    wRecBtnLabel = lv_obj_get_child(wRecBtn, 0);
+    wDynoMaxHp = makeLabel(boxMax, "P. MAX  : 0.0 ch", &lv_font_montserrat_30, CL_GREEN, 15, 15);
+    wDynoMaxNm = makeLabel(boxMax, "C. MAX  : 0.0 Nm", &lv_font_montserrat_30, CL_CYAN, 15, 70);
+    wDynoMaxEgt = makeLabel(boxMax, "EGT MAX : --- \xC2\xB0" "c", &lv_font_montserrat_30,
+                            CL_ORANGE, 15, 125);
 
-    wSdState = makeLabel(p, "SD : ...", &lv_font_montserrat_14, C_DIM,
-                         LV_ALIGN_TOP_MID, 0, 140);
-    makeLabel(p, "Export des sessions : via Pixel 5", &lv_font_montserrat_14, C_DIM,
-              LV_ALIGN_TOP_MID, 0, 166);
-
-    wSessionsList = lv_list_create(p);
-    lv_obj_set_size(wSessionsList, 420, 170);
-    lv_obj_align(wSessionsList, LV_ALIGN_CENTER, 0, 40);
-    lv_obj_set_style_bg_color(wSessionsList, lv_color_hex(0x0B0F19), 0);
-
-    makeButton(p, "RAFRAICHIR", LV_ALIGN_BOTTOM_MID, 0, -20, refreshBtnCb);
-    refreshSessionList();
-}
-
-// ------------------------------ Alarme EGT ---------------------------------
-
-void alarmTick(const TelemetryFrame &f)
-{
-    static bool alarmed = false;
-    static bool phase = false;
-    static uint32_t lastToggle = 0;
-
-    if (!alarmed && f.egt_c >= EGT_ALARM_C) {
-        alarmed = true;
-        phase = true;
-    } else if (alarmed && f.egt_c < EGT_ALARM_C - EGT_ALARM_HYST_C) {
-        alarmed = false;
-    }
-
-    lv_color_t bg = C_BG;
-    if (alarmed) {
-        // "orange flash" : fond alternance orange / noir toutes les 250 ms
-        uint32_t now = millis();
-        if (now - lastToggle >= EGT_ALARM_PERIOD_MS) {
-            lastToggle = now;
-            phase = !phase;
-        }
-        if (phase) bg = lv_color_hex(0xFF8C00);
-    }
-    for (int i = 0; i < 5; i++) {
-        lv_obj_set_style_bg_color(g_pages[i], bg, 0);
-    }
-}
-
-// ------------------------------ Page switching -----------------------------
-
-void showPage(uint8_t idx)
-{
-    if (idx > PAGE_SESSIONS) idx = 0;
-    for (int i = 0; i < NB_PAGES; i++) {
-        if (i == idx) lv_obj_clear_flag(g_pages[i], LV_OBJ_FLAG_HIDDEN);
-        else lv_obj_add_flag(g_pages[i], LV_OBJ_FLAG_HIDDEN);
-    }
-    g_pageIdx = idx;
-    if (idx == PAGE_SESSIONS) refreshSessionList();
-}
-
-// ------------------------------ Mise a jour --------------------------------
-
-void updateRacePage(const TelemetryFrame &f, const ChronoState &c)
-{
-    bool hasEgt = f.egt_c >= 0;
-    lv_color_t zc;
-    egtZoneColor(hasEgt ? f.egt_c : 0, zc);
-    float egt = hasEgt ? f.egt_c : 0.0f;
-    if (egt < 0) egt = 0;
-    if (egt > 700) egt = 700;
-    int d = (int)(egt / 700.0f * EGT_LEN_TOT);
-    int vFill = d < EGT_LEN_V ? d : EGT_LEN_V;
-    int eFill = d > EGT_LEN_V ? d - EGT_LEN_V : 0;
-    if (eFill > EGT_LEN_ELB) eFill = EGT_LEN_ELB;
-    int hFill = d > EGT_LEN_V + EGT_LEN_ELB ? d - EGT_LEN_V - EGT_LEN_ELB : 0;
-    lv_obj_set_height(wEgtFillV, vFill);
-    lv_obj_set_y(wEgtFillV, EGT_V_BOT - vFill);
-    lv_arc_set_value(wEgtFillE, (int)(eFill * 100.0f / EGT_LEN_ELB));
-    lv_obj_set_width(wEgtFillH, hFill);
-    lv_obj_set_style_bg_color(wEgtFillV, zc, 0);
-    lv_obj_set_style_bg_color(wEgtFillH, zc, 0);
-    lv_obj_set_style_arc_color(wEgtFillE, zc, LV_PART_INDICATOR);
-    if (hasEgt) lv_label_set_text_fmt(wEgtLabel, "%.0f °c", f.egt_c);
-    else lv_label_set_text(wEgtLabel, "---");
-    lv_obj_set_style_text_color(wEgtLabel, zc, 0);
-
-    char cur[16], best[16], last[16];
-    fmtLap(c.current_lap_ms, cur, sizeof(cur));
-    lv_label_set_text(wLapCur, cur);
-    fmtLap(c.best_lap_ms, best, sizeof(best));
-    lv_label_set_text_fmt(wLapBest, "BEST   %s", best);
-    fmtLap(c.last_lap_ms, last, sizeof(last));
-    lv_label_set_text_fmt(wLapLast, "LAST   %s", last);
-
-    int dm = (int)(f.egt_max_c / 700.0f * EGT_LEN_TOT);
-    if (dm < 0) dm = 0;
-    if (dm > EGT_LEN_TOT) dm = EGT_LEN_TOT;
-    if (dm <= EGT_LEN_V) {          // curseur sur la branche verticale
-        lv_obj_set_style_radius(wEgtMark, 2, 0);
-        lv_obj_set_size(wEgtMark, EGT_BAR + 12, 4);
-        lv_obj_set_pos(wEgtMark, -6, EGT_V_BOT - dm - 2);
-    } else if (dm <= EGT_LEN_V + EGT_LEN_ELB) {   // dans le coude arrondi : point
-        float frac = (dm - EGT_LEN_V) / (float)EGT_LEN_ELB;
-        float a = (180.0f + 90.0f * frac) * 3.14159f / 180.0f;
-        float rm = (EGT_R_IN + EGT_R_OUT) / 2.0f;
-        int px = EGT_CX + (int)(rm * cosf(a)) - 4;
-        int py = EGT_CY + (int)(rm * sinf(a)) - 4;
-        lv_obj_set_style_radius(wEgtMark, LV_RADIUS_CIRCLE, 0);
-        lv_obj_set_size(wEgtMark, 8, 8);
-        lv_obj_set_pos(wEgtMark, px, py);
-    } else {                        // curseur sur la branche horizontale
-        lv_obj_set_style_radius(wEgtMark, 2, 0);
-        lv_obj_set_size(wEgtMark, 4, EGT_BAR + 12);
-        lv_obj_set_pos(wEgtMark, EGT_CX + (dm - EGT_LEN_V - EGT_LEN_ELB) - 2, -6);
-    }
-
-    GpsFix g = gps_get();
-    if (g.valid) {
-        lv_label_set_text_fmt(wGpsBadge, "%d sats", g.sats);
-        lv_color_t q = g.sats >= 8 ? C_GREEN : (g.sats >= 4 ? C_ORANGE : C_RED);
-        lv_obj_set_style_bg_color(wGpsBadge, q, 0);
-        lv_label_set_text_fmt(wAccLabel, "%.1fm", g.hdop * 2.5f);
-    } else {
-        lv_label_set_text(wGpsBadge, "GPS --");
-        lv_obj_set_style_bg_color(wGpsBadge, C_RED, 0);
-        lv_label_set_text(wAccLabel, "-- m");
-    }
-    lv_obj_align(wGpsBadge, LV_ALIGN_TOP_RIGHT, -128, 58);
-    lv_label_set_text_fmt(wSdBadge, "SD %s", sd_ready() ? "ok" : "--");
-    lv_obj_set_style_bg_color(wSdBadge, sd_ready() ? C_GREEN : C_RED, 0);
-    lv_obj_align(wSdBadge, LV_ALIGN_TOP_RIGHT, -64, 58);
-    lv_obj_set_style_bg_color(wBleBadge, ble_connected() ? C_GREEN : C_RED, 0);
-    lv_obj_align(wBleBadge, LV_ALIGN_TOP_RIGHT, -16, 58);
-    lv_obj_align(wAccLabel, LV_ALIGN_TOP_RIGHT, -215, 64);
-}
-
-void updateTelemPage(const TelemetryFrame &f, const ChronoState &)
-{
-    // Cercle 300 px : rayon 138 px utile, pleine echelle a 2.0 g
-    const float RADIUS_PX = 138;
-    const float G_SCALE = 2.0f;
-    float dx = f.g_lat / G_SCALE * RADIUS_PX;
-    float dy = f.g_long / G_SCALE * RADIUS_PX;
-    if (dx > RADIUS_PX) dx = RADIUS_PX;
-    if (dx < -RADIUS_PX) dx = -RADIUS_PX;
-    if (dy > RADIUS_PX) dy = RADIUS_PX;
-    if (dy < -RADIUS_PX) dy = -RADIUS_PX;
-    lv_obj_align(wGDot, LV_ALIGN_CENTER, (int)dx, -(int)dy);
-
-    lv_label_set_text_fmt(wGLatLabel, "LAT  %+.2f g", f.g_lat);
-    lv_label_set_text_fmt(wGLongLabel, "LONG %+.2f g", f.g_long);
-    lv_bar_set_value(wBankBar, (int)f.bank_deg, LV_ANIM_OFF);
-    lv_label_set_text_fmt(wBankLabel, "INCLINAISON  %+.0f deg", f.bank_deg);
-}
-
-void updateEnginePage(const TelemetryFrame &f)
-{
-    lv_label_set_text_fmt(wRpmLabel, "%u", f.rpm);
-    lv_bar_set_value(wRpmBar, f.rpm, LV_ANIM_OFF);
-    if (f.egt_max_c > 0) lv_label_set_text_fmt(wEgtMaxLabel, "%.0f C", f.egt_max_c);
-    lv_label_set_text_fmt(wPowerLabel, "%.1f kW", f.power_kw);
-    lv_label_set_text_fmt(wTorqueLabel, "%.1f Nm", f.torque_nm);
+    makeColorBtn(parent, 260, 55, LV_ALIGN_BOTTOM_MID, 0, -25, lv_color_hex(0xD32F2F),
+                 "RAZ PICS BANC", &lv_font_montserrat_24, razPicsCb);
 }
 
 void updateDynoPage(const TelemetryFrame &f)
 {
-    bool hasEgt = f.egt_c >= 0;
-    lv_color_t zc;
-    egtZoneColor(hasEgt ? f.egt_c : 0, zc);
-
-    if (hasEgt) lv_label_set_text_fmt(wDynoEgt, "%.0f °c", f.egt_c);
-    else lv_label_set_text(wDynoEgt, "---");
-    lv_obj_set_style_text_color(wDynoEgt, zc, 0);
-    if (f.egt_max_c > 0) lv_label_set_text_fmt(wDynoEgtMax, "EGT MAX   %.0f °c", f.egt_max_c);
-
-    lv_label_set_text_fmt(wDynoRpm, "%u", f.rpm);
-    lv_label_set_text_fmt(wDynoP, "%.1f kW", f.power_kw);
-    lv_label_set_text_fmt(wDynoC, "%.1f Nm", f.torque_nm);
-    if (s_dynoPMax > 0) lv_label_set_text_fmt(wDynoPMax, "P MAX   %.1f kW", s_dynoPMax);
-    if (s_dynoCMax > 0) lv_label_set_text_fmt(wDynoCMax, "C MAX   %.1f Nm", s_dynoCMax);
+    float hp = f.power_kw * 1.35962f;   // ch
+    lv_label_set_text_fmt(wDynoHp, "%.1f ch", hp);
+    lv_label_set_text_fmt(wDynoNm, "%.1f Nm", f.torque_nm);
+    if (f.egt_max_c > 0) {
+        lv_label_set_text_fmt(wDynoMaxEgt, "EGT MAX : %.0f \xC2\xB0" "c", f.egt_max_c);
+    }
+    updateDynoLabels();
 }
 
-void updateSessionsPage(const TelemetryFrame &f)
-{
-    lv_obj_set_style_bg_color(wRecBtn, f.recording ? C_RED : C_GREEN, 0);
-    lv_label_set_text(wRecBtnLabel, f.recording ? "ARRETER" : "ENREGISTRER");
-    lv_label_set_text(wSdState, sd_ready() ? "SD : PRETE" : "SD : ABSENTE");
-}
-
-void uiTimer(lv_timer_t *)
+// -------------------------- Page 4 : PARAMETRAGE ----------------------------
+void recBtnCb(lv_event_t *)
 {
     TelemetryFrame f = telemetry_get();
-    ChronoState c = chrono_get();
-    alarmTick(f);
-    if (f.power_kw > s_dynoPMax) s_dynoPMax = f.power_kw;
-    if (f.torque_nm > s_dynoCMax) s_dynoCMax = f.torque_nm;
-    switch (g_pageIdx) {
-    case PAGE_RACE: updateRacePage(f, c); break;
-    case PAGE_TELEM: updateTelemPage(f, c); break;
-    case PAGE_ENGINE: updateEnginePage(f); break;
-    case PAGE_DYNO: updateDynoPage(f); break;
-    case PAGE_SETTINGS: break;
-    case PAGE_SESSIONS: updateSessionsPage(f); break;
+    cmds_requestRecord(!f.recording);
+}
+
+void tareImuCb(lv_event_t *)
+{
+    acq_calibrateFlat();
+    lv_label_set_text(wSetupStatus, "IMU Tare OK !");
+}
+
+void setLineCb(lv_event_t *)
+{
+    GpsFix g = gps_get();
+    if (g.valid) {
+        settings_lapLineHere(g);
+        lv_label_set_text(wSetupStatus, "Ligne GPS Enregistree !");
+    } else {
+        lv_label_set_text(wSetupStatus, "Attente Fix GPS...");
     }
 }
 
-// -------------------------------- Tache ------------------------------------
+void massMinusCb(lv_event_t *)
+{
+    VehicleSettings s = settings_get();
+    s.mass_kg -= 1.0f;
+    if (s.mass_kg < 40) s.mass_kg = 40;
+    settings_update(s);
+    lv_label_set_text_fmt(wMassVal, "Poids Total : %.0f kg", s.mass_kg);
+}
 
+void massPlusCb(lv_event_t *)
+{
+    VehicleSettings s = settings_get();
+    s.mass_kg += 1.0f;
+    if (s.mass_kg > 500) s.mass_kg = 500;
+    settings_update(s);
+    lv_label_set_text_fmt(wMassVal, "Poids Total : %.0f kg", s.mass_kg);
+}
+
+void scxMinusCb(lv_event_t *)
+{
+    VehicleSettings s = settings_get();
+    s.cxsa -= 0.01f;
+    if (s.cxsa < 0.10f) s.cxsa = 0.10f;
+    settings_update(s);
+    lv_label_set_text_fmt(wScxVal, "S.Cx Aero : %.2f", s.cxsa);
+}
+
+void scxPlusCb(lv_event_t *)
+{
+    VehicleSettings s = settings_get();
+    s.cxsa += 0.01f;
+    settings_update(s);
+    lv_label_set_text_fmt(wScxVal, "S.Cx Aero : %.2f", s.cxsa);
+}
+
+void buildSetupPage(lv_obj_t *parent)
+{
+    makeLabelAlign(parent, "PARAMETRAGE & IMU", &lv_font_montserrat_26, CL_WHITE,
+                   LV_ALIGN_TOP_MID, 0, 15);
+
+    // Enregistrement SD autonome (bouton conserve, absent du sketch de base)
+    wRecBtn = makeColorBtn(parent, 220, 40, LV_ALIGN_TOP_MID, 0, 52, CL_GREEN,
+                           "ENREGISTRER", &lv_font_montserrat_20, recBtnCb);
+    wRecBtnLabel = (lv_obj_t *)lv_obj_get_child(wRecBtn, 0);
+
+    VehicleSettings st = settings_get();
+    wMassVal = lv_label_create(parent);
+    lv_label_set_text_fmt(wMassVal, "Poids Total : %.0f kg", st.mass_kg);
+    lv_obj_set_style_text_color(wMassVal, CL_WHITE, 0);
+    lv_obj_set_style_text_font(wMassVal, &lv_font_montserrat_24, 0);
+    lv_obj_set_pos(wMassVal, 30, 110);
+
+    makeColorBtn(parent, 70, 50, LV_ALIGN_TOP_LEFT, 300, 100,
+                 lv_color_hex(0x333333), "-1", &lv_font_montserrat_24, massMinusCb);
+    makeColorBtn(parent, 70, 50, LV_ALIGN_TOP_LEFT, 385, 100,
+                 lv_color_hex(0x333333), "+1", &lv_font_montserrat_24, massPlusCb);
+
+    wScxVal = lv_label_create(parent);
+    lv_label_set_text_fmt(wScxVal, "S.Cx Aero : %.2f", st.cxsa);
+    lv_obj_set_style_text_color(wScxVal, CL_WHITE, 0);
+    lv_obj_set_style_text_font(wScxVal, &lv_font_montserrat_24, 0);
+    lv_obj_set_pos(wScxVal, 30, 165);
+
+    makeColorBtn(parent, 70, 50, LV_ALIGN_TOP_LEFT, 300, 155,
+                 lv_color_hex(0x333333), "-", &lv_font_montserrat_24, scxMinusCb);
+    makeColorBtn(parent, 70, 50, LV_ALIGN_TOP_LEFT, 385, 155,
+                 lv_color_hex(0x333333), "+", &lv_font_montserrat_24, scxPlusCb);
+
+    makeColorBtn(parent, 380, 60, LV_ALIGN_CENTER, 0, 55, lv_color_hex(0x0288D1),
+                 "RAZ ACCELEROMETRES (TARE)", &lv_font_montserrat_20, tareImuCb);
+    makeColorBtn(parent, 380, 55, LV_ALIGN_CENTER, 0, 130, lv_color_hex(0x2E7D32),
+                 "DEFINIR LIGNE CHRONO GPS", &lv_font_montserrat_20, setLineCb);
+
+    wSetupStatus = makeLabelAlign(parent, "Pret", &lv_font_montserrat_24, CL_GREEN,
+                                  LV_ALIGN_BOTTOM_MID, 0, -15);
+}
+
+void updateSetupPage(const TelemetryFrame &f)
+{
+    lv_obj_set_style_bg_color(wRecBtn, f.recording ? CL_RED : CL_GREEN, 0);
+    lv_label_set_text(wRecBtnLabel, f.recording ? "ARRETER" : "ENREGISTRER");
+    VehicleSettings s = settings_get();
+    lv_label_set_text_fmt(wMassVal, "Poids Total : %.0f kg", s.mass_kg);
+    lv_label_set_text_fmt(wScxVal, "S.Cx Aero : %.2f", s.cxsa);
+}
+
+// ------------------------------ Timer UI ------------------------------------
+void uiTimer(lv_timer_t *)
+{
+    TelemetryFrame f = telemetry_get();
+
+    // Maxima pics banc : suivis en permanence (toutes pages)
+    float hp = f.power_kw * 1.35962f;
+    if (hp > s_dynoPMax) s_dynoPMax = hp;
+    if (f.torque_nm > s_dynoCMax) s_dynoCMax = f.torque_nm;
+
+    if (!g_tileview) return;
+    lv_obj_t *act = lv_tileview_get_tile_act(g_tileview);
+    if (act == g_tilePiste) updateTrackPage(f);
+    else if (act == g_tileGForce) updateGForcePage(f);
+    else if (act == g_tileDyno) updateDynoPage(f);
+    else if (act == g_tileSetup) updateSetupPage(f);
+}
+
+// --------------------------------- Tache ------------------------------------
 void uiTask(void *param)
 {
     (void)param;
@@ -802,15 +592,23 @@ void ui_start()
     lv_init();
     screen_lvgl_register();
 
-    buildRacePage();
-    buildTelemPage();
-    buildEnginePage();
-    buildDynoPage();
-    buildSettingsPage();
-    buildSessionsPage();
-    showPage(PAGE_RACE);
+    lv_obj_t *scr = lv_scr_act();
+    lv_obj_set_style_bg_color(scr, CL_BLACK, 0);
 
-    lv_timer_create(uiTimer, 100, nullptr);
+    g_tileview = lv_tileview_create(scr);
+    lv_obj_set_style_bg_color(g_tileview, CL_BLACK, 0);
+
+    g_tilePiste  = lv_tileview_add_tile(g_tileview, 0, 0, LV_DIR_RIGHT);
+    g_tileGForce = lv_tileview_add_tile(g_tileview, 1, 0, LV_DIR_LEFT | LV_DIR_RIGHT);
+    g_tileDyno   = lv_tileview_add_tile(g_tileview, 2, 0, LV_DIR_LEFT | LV_DIR_RIGHT);
+    g_tileSetup  = lv_tileview_add_tile(g_tileview, 3, 0, LV_DIR_LEFT);
+
+    buildTrackPage(g_tilePiste);
+    buildGForcePage(g_tileGForce);
+    buildDynoPage(g_tileDyno);
+    buildSetupPage(g_tileSetup);
+
+    lv_timer_create(uiTimer, 50, nullptr);
 
     xTaskCreatePinnedToCore(uiTask, "ui", 16384, nullptr, 2, nullptr, 1);
 }
