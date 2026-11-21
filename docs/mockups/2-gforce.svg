@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="560" height="600" viewBox="0 0 560 600">
+  <rect width="560" height="600" fill="#101820"/>
+  <rect x="30" y="20" width="500" height="560" rx="18" fill="#1b2530"/>
+  <rect x="40" y="60" width="480" height="480" fill="#000000"/>
+  <rect x="40" y="60" width="480" height="480" fill="none" stroke="#31404f" stroke-width="4"/>
+  <text x="280" y="99" fill="#F58220" font-size="24" font-weight="bold" text-anchor="middle" font-family='Montserrat, Arial, sans-serif'>G-FORCE &amp; DYNAMIQUE</text>
+  <circle cx="280" cy="280" r="130" fill="#111111" stroke="#555555" stroke-width="2"/>
+  <circle cx="280" cy="280" r="65" fill="none" stroke="#444444" stroke-width="1"/>
+  <line x1="150" y1="280" x2="410" y2="280" stroke="#333333" stroke-width="1"/>
+  <line x1="280" y1="150" x2="280" y2="410" stroke="#333333" stroke-width="1"/>
+  <circle cx="315" cy="262" r="12" fill="#00E676"/>
+  <text x="70" y="441" fill="#FFFFFF" font-size="26" font-family='Montserrat, Arial, sans-serif'>Lat: 0.42 G</text>
+  <text x="300" y="441" fill="#FFFFFF" font-size="26" font-family='Montserrat, Arial, sans-serif'>Lon: -0.10 G</text>
+  <text x="70" y="500" fill="#F58220" font-size="28" font-weight="bold" font-family='Montserrat, Arial, sans-serif'>9450 RPM</text>
+  <text x="320" y="500" fill="#00E5FF" font-size="28" font-weight="bold" font-family='Montserrat, Arial, sans-serif'>142 km/h</text>
+  <text x="30" y="588" fill="#8fa3b2" font-size="13" font-family='Montserrat, Arial, sans-serif'>Page G-FORCE - cible 1.5G, point dynamique (echelle g x 80), Lat/Lon/RPM</text>
+</svg>
